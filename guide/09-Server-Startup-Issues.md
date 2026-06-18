@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CounterStrikeSharp.API" Version="1.0.369" />
+    <PackageReference Include="MySqlConnector" Version="2.6.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="lang\**\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include=".github\CONTRIBUTING.md" />
+    <None Include=".github\FUNDING.yml" />
+    <None Include=".github\ISSUE_TEMPLATE\bug_report.md" />
+    <None Include=".github\ISSUE_TEMPLATE\feature_request.md" />
+    <None Include=".github\pull_request_template.md" />
+    <None Include=".github\REPOSITORY_GUIDE.md" />
+    <None Include=".github\SECURITY.md" />
+  </ItemGroup>
+
+  <!-- Copy compiled plugin and dependencies to release folder -->
+  <Target Name="PrepareRelease" AfterTargets="Build">
+    <ItemGroup>
+      <ReleaseFiles Include="$(OutputPath)**\*" Exclude="$(OutputPath).nativeimage\**" />
+    </ItemGroup>
+    <MakeDir Directories="$(ProjectDir)bin\Release\SmartRestart" />
+    <Copy SourceFiles="@(ReleaseFiles)" DestinationFolder="$(ProjectDir)bin\Release\SmartRestart\%(RecursiveDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>
