@@ -1,0 +1,66 @@
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio
+.vs/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# Build Output
+*.dll
+*.exe
+*.pdb
+*.cache
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+.nuget/
+
+# Config files with sensitive data
+config.json
+**/config.json
+
+# Database
+*.db
+*.sqlite
+*.db-shm
+*.db-wal
+
+# OS Files
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# IDE
+*.code-workspace
+.idea/
+
+# Temp files
+*.tmp
+*.temp
+*.log
+*.bak
+
+# Don't ignore example/template configs
+!config.example.json
+!config.template.json

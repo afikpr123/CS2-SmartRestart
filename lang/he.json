@@ -1,0 +1,5 @@
+{
+  "RestartWarning": "השרת יופעל מחדש בעוד {yellow}{time}{default}!",
+  "RestartWarningCenter": "⚠️ הפעלה מחדש של השרת בעוד {time} ⚠️",
+  "RestartingNow": "השרת מופעל מחדש כעת!"
+}

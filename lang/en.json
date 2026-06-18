@@ -1,0 +1,5 @@
+{
+  "RestartWarning": "Server will restart in {yellow}{time}{default}!",
+  "RestartWarningCenter": "⚠️ SERVER RESTART IN {time} ⚠️",
+  "RestartingNow": "Server is restarting now!"
+}
