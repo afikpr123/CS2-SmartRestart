@@ -28,4 +28,13 @@
     <None Include=".github\SECURITY.md" />
   </ItemGroup>
 
+  <!-- Copy compiled plugin and dependencies to release folder -->
+  <Target Name="PrepareRelease" AfterTargets="Build">
+    <ItemGroup>
+      <ReleaseFiles Include="$(OutputPath)**\*" Exclude="$(OutputPath).nativeimage\**" />
+    </ItemGroup>
+    <MakeDir Directories="$(ProjectDir)bin\Release\SmartRestart" />
+    <Copy SourceFiles="@(ReleaseFiles)" DestinationFolder="$(ProjectDir)bin\Release\SmartRestart\%(RecursiveDir)" SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>
