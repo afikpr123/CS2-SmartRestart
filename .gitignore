@@ -48,7 +48,29 @@ config.json
 # OS Files
 .DS_Store
 Thumbs.db
-*.swp
+
+# Wiki build files (use build-wiki.ps1 instead)
+wiki-build/
+wiki-temp/
+*.wiki.git/
+
+# Generated markdown from wiki building
+Installation.md
+Configuration.md
+Scheduled-Restarts.md
+Language-Customization.md
+Discord-Integration.md
+Database-Integration.md
+Commands.md
+Troubleshooting.md
+Server-Startup-Issues.md
+Home.md
+_Sidebar.md
+
+# Release/Deploy scripts
+upload-release.ps1
+SmartRestart-*.zip
+
 *~
 
 # IDE
