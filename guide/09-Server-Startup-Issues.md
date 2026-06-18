@@ -1,50 +1,87 @@
 # ⚠️ Server Startup Issues
-
-This guide helps you troubleshoot common issues when starting your server with SmartRestart plugin.
-
----
-
-## Common Startup Errors
-
-### Plugin Not Loading
-
-**Solutions:**
-1. Ensure CounterStrikeSharp is installed and updated
-2. Check that `CounterStrikeSharp.API` NuGet package is referenced
-3. Verify plugin folder structure matches requirements
-4. Check file permissions on plugin DLL
-
-### Missing Dependencies
-
-**Solutions:**
-1. Verify all dependencies are copied to plugin folder
-2. Check `bin/Release/` contains all required DLLs
-3. Ensure `CopyLocalLockFileAssemblies` is `true` in `.csproj`
-4. Rebuild: `dotnet build -c Release`
+Problems with SmartRestart? Find solutions here.
 
 ---
 
-## Troubleshooting Steps
+## Restarts Not Happening
 
-1. Enable debug logging in config
-2. Check server console for initialization messages
-3. Review log files in `cs2/logs/`
-4. Verify permissions on plugin folder
-5. Test build manually
+### Scheduled Restarts Not Triggering
+
+Check your config:
+- Is `"Enabled": true`?
+- Is `"ScheduledRestarts"` enabled?
+- Times in correct format? (HH:MM:SS in 24-hour)
+
+Example:
+{ "ScheduledRestarts": { "Enabled": true, "Times": ["12:00:00", "00:00:00"] } }
+
+
+### Players Don't See Countdown
+
+Check:
+- Is `"BroadcastToChat": true`?
+- Is `"RestartMessage"` set?
+- Does message have `{0}` for countdown?
+
+### Restart Cancels Too Easily
+
+Disable player cancellation: { "CancelIfPlayersInGame": false, "AllowPlayersToCancel": false }
 
 ---
 
-## Configuration Issues
+## Interval Restarts Not Working
 
-- Validate JSON syntax at https://jsonlint.com/
-- Check for trailing commas
-- Use correct data types (boolean, number, array)
-- Include all required fields
+### Restarts Every X Minutes
+
+Check config: { "IntervalRestarts": { "Enabled": true, "IntervalMinutes": 120 } }
+
+
+**Important:** Use MINUTES not seconds (120 = 2 hours)
 
 ---
 
-## Getting Help
+## Messages & Discord
 
-- Check Documentation
-- Search Issues: https://github.com/afikpr123/CS2-SmartRestart/issues
-- Join Discussions: https://github.com/afikpr123/CS2-SmartRestart/discussions
+### Wrong Language
+
+1. Check `/lang/` folder has correct files
+2. Set correct language: `"Language": "en"`
+3. Restart plugin
+
+### Discord Webhook Issues
+
+1. Create new webhook in Discord
+2. Copy full URL to config
+3. Restart plugin
+
+---
+
+## Database Issues
+
+### Can't Connect
+
+Check credentials and ask your hosting provider if database works.
+
+Disable temporarily: { "Database": { "Enabled": false } }
+
+
+---
+
+## Common Mistakes
+
+❌ Using 12-hour time (12 AM) → ✅ Use 24-hour (00:00)
+❌ Interval in seconds → ✅ Use minutes (120 = 2 hours)
+❌ Removing {0} from message → ✅ Keep it for countdown
+❌ Editing config while running → ✅ Restart server after changes
+
+---
+
+## Verify Before Help
+
+- Config valid at https://jsonlint.com
+- All `"Enabled": true`
+- No typos in settings
+- Restart command works manually
+- Fully restarted server after changes
+
+Help: https://github.com/afikpr123/CS2-SmartRestart/issues
