@@ -9,8 +9,6 @@ Scheduled restarts • Discord notifications • Database logging • Multi-lang
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.txt)
 [![Version](https://img.shields.io/github/v/release/afikpr123/CS2-SmartRestart?color=green)](https://github.com/afikpr123/CS2-SmartRestart/releases)
 [![Issues](https://img.shields.io/github/issues/afikpr123/CS2-SmartRestart?color=orange)](https://github.com/afikpr123/CS2-SmartRestart/issues)
-[![Discord](https://img.shields.io/badge/Discord-Community-7289da)](https://discord.gg/example)
-
 [Documentation](https://github.com/afikpr123/CS2-SmartRestart/wiki) • [Issues](https://github.com/afikpr123/CS2-SmartRestart/issues) • [Discussions](https://github.com/afikpr123/CS2-SmartRestart/discussions)
 
 </div>
@@ -42,18 +40,7 @@ Scheduled restarts • Discord notifications • Database logging • Multi-lang
 
 ### Configuration
 
-Create a `config.json` file in your plugin folder:
-
-```json
-{ 
-  "Enabled": true, 
-  "ScheduledRestarts": { "Enabled": true, "Times": ["12:00:00", "00:00:00"] },
-  "PreRestartWarning": 300,
-  "RestartMessage": "Server restarting in {0} seconds!",
-  "BroadcastToChat": true,
-  "Discord": { "Enabled": false }
-}
-```
+A `config.json` file will auto generate into your plugin folder:
 
 **That's it!** Your server will now restart automatically.
 
@@ -83,38 +70,121 @@ Create a `config.json` file in your plugin folder:
 
 ## 🎮 Usage Examples
 
-### Example 1: Daily Restarts at Specific Times
+### Example of a `config.json` file with advanced smart restart settings:
 
 ```json
-{ 
-   "ScheduledRestarts": { "Enabled": true, 
-   "Times": ["06:00:00", "14:00:00", "22:00:00"] }, 
-   "PreRestartWarning": 300, 
-   "RestartMessage": "Server restarting in {0} seconds!" 
-}
-```
+{
+  // Auto-restart settings
+  "EnableAutoRestart": true, // Restart server automatically when empty
+  "DelayAfterLastPlayerLeaves": 60, // Seconds to wait after last player leaves (used if Smart restart disabled)
+  "MinimumUptimeMinutes": 5, // Minimum uptime (minutes) for MANUAL restarts - prevents accidental rapid restarts
+  "MinimumUptimeForEmptyRestartHours": 4, // Minimum uptime (hours) for AUTO empty-server restarts - prevents spam
 
-### Example 2: Restart Every 2 Hours
+  // Smart empty restart settings
+  "EmptyRestartCooldownMinutes": 30, // Cooldown between empty restarts - prevents restart spam
+  "MinimumPlayersBeforeEmptyRestart": 1, // Server must have had this many players before restarting when empty
+  "RequirePlayerActivityForEmptyRestart": true, // Only restart if server had player activity since last restart
 
-```json
-{ 
-   "IntervalRestarts": { 
-   "Enabled": true,
-   "IntervalMinutes": 120,
-   "FirstRestartDelay": 30 
-   } 
-}
-```
+  // Advanced smart restart (time-aware + session-based)
+  "SmartEmptyRestart": {
+    "Enabled": true, // Enable advanced smart restart logic
+    "Strategy": "Smart", // Options: Immediate, Smart
+    "PeakHours": {
+      "Enabled": true,
+      "StartHour": 18, // 24-hour format (6 PM)
+      "EndHour": 23, // 11 PM
+      "DelayMinutes": 15, // Wait 15 minutes during peak hours (players might return)
+      "OffPeakDelayMinutes": 3 // Fast restart during off-peak (3 minutes)
+    },
+    "SessionBased": {
+      "Enabled": true,
+      "MinimumSessionLengthMinutes": 5, // Only count sessions longer than 5 minutes
+      "MinimumTotalPlaytimeMinutes": 30, // Server must have 30 min of playtime before restart
+      "RecentActivityWindowMinutes": 10 // Delay restart if player left within 10 minutes
+    },
+    "MaximumEmptyWaitMinutes": 30 // Never wait longer than 30 minutes
+  },
 
-### Example 3: With Discord Notifications
+  // Scheduled restarts
+  "ScheduledRestarts": [
+    {
+      "Enabled": true,
+      "Hour": 6, // 24-hour format (0-23)
+      "Minute": 0,
+      "Description": "Morning restart"
+    },
+    {
+      "Enabled": true,
+      "Hour": 18,
+      "Minute": 0,
+      "Description": "Evening restart"
+    }
+  ],
 
-```json
-{ 
-   "Discord": { 
-   "Enabled": true, 
-   "WebhookUrl": "https://discord.com/api/webhooks/YOUR_ID/YOUR_TOKEN", 
-   "NotifyOnRestart": true 
-   } 
+  // Warning messages before restart
+  "WarningMessages": {
+    "Enabled": true,
+    "WarningTimes": [300, 180, 120, 60, 30, 10], // Seconds before restart to warn players
+    "ShowCenterAlert": true, // Show large center-screen alerts
+    "CenterAlertDuration": 5 // How long center alerts stay visible (seconds)
+  },
+
+  // Restart command (quit for Pelican/Pterodactyl, exit, or _restart)
+  "RestartCommand": "quit",
+
+  // Chat message prefix (supports color tags like {gold}, {blue}, {red}, etc.)
+  "ChatPrefix": "[{gold}SmartRestart{default}]",
+
+  // Discord webhook notifications
+  "DiscordWebhook": {
+    "Enabled": false,
+    "WebhookUrl": "https://discord.com/api/webhooks/YOUR_WEBHOOK_URL_HERE",
+    "EmbedStyle": "detailed", // Options: simple, detailed, professional
+    "FooterImageUrl": "https://png.pngtree.com/png-vector/20250826/ourmid/pngtree-rack-illustration-isometric-server-png-image_17213766.webp",
+    "RestartEmbed": {
+      "Enabled": true,
+      "Color": "231, 76, 60", // RGB format: R, G, B (Orange/Red)
+      "Title": "🔄 Server Restarting",
+      "ShowUptime": true,
+      "ShowPlayers": true,
+      "ShowReason": true,
+      "ShowEstimatedDowntime": true,
+      "EstimatedDowntimeSeconds": 120
+    },
+    "OnlineEmbed": {
+      "Enabled": true,
+      "Color": "46, 204, 113", // RGB format: R, G, B (Green)
+      "Title": "✅ Server Back Online!",
+      "ShowDowntime": true,
+      "ShowMap": true,
+      "ShowConnectInfo": true
+    },
+    "ManualEmbed": {
+      "Enabled": true,
+      "Color": "28, 109, 240", // RGB format: R, G, B (Blue)
+      "Title": "🔧 Manual Server Restart",
+      "ShowUptime": true,
+      "ShowPlayers": true,
+      "ShowAdmin": true,
+      "ShowEstimatedDowntime": true,
+      "EstimatedDowntimeSeconds": 120
+    },
+    "SendOnScheduledRestart": true,
+    "SendOnManualRestart": true,
+    "SendOnEmptyServerRestart": true,
+    "SendWarnings": false
+  },
+
+  // SimpleAdmin database integration for permission checks
+  "Database": {
+    "Enabled": false, // Enable to use SimpleAdmin permissions for !serverrestart command
+    "Host": "localhost",
+    "Port": 3306,
+    "Database": "cs2_server",
+    "Username": "user",
+    "Password": "password",
+    "RequiredPermission": "@css/smartrestart" // Permission flag checked in sa_admins_groups and sa_admins tables
+  }
 }
 ```
 
@@ -154,17 +224,6 @@ SmartRestart/
 └── MySqlConnector.dll    # Database support
 ```
 
----
-
-## 🤝 Contributing
-
-We welcome contributions! Here's how you can help:
-
-- **Found a bug?** [Report it on Issues](https://github.com/afikpr123/CS2-SmartRestart/issues)
-- **Have an idea?** [Share it on Discussions](https://github.com/afikpr123/CS2-SmartRestart/discussions)
-- **Want to contribute?** See [Contributing Guidelines](.github/CONTRIBUTING.md)
-
----
 
 ## 📞 Support
 
