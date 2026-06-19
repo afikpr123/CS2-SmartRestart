@@ -44,8 +44,16 @@ Scheduled restarts • Discord notifications • Database logging • Multi-lang
 
 Create a `config.json` file in your plugin folder:
 
-{ "Enabled": true, "ScheduledRestarts": { "Enabled": true, "Times": ["12:00:00", "00:00:00"] }, "PreRestartWarning": 300, "RestartMessage": "Server restarting in {0} seconds!", "BroadcastToChat": true, "Discord": { "Enabled": false } }
-
+```json
+{ 
+  "Enabled": true, 
+  "ScheduledRestarts": { "Enabled": true, "Times": ["12:00:00", "00:00:00"] },
+  "PreRestartWarning": 300,
+  "RestartMessage": "Server restarting in {0} seconds!",
+  "BroadcastToChat": true,
+  "Discord": { "Enabled": false }
+}
+```
 
 **That's it!** Your server will now restart automatically.
 
@@ -77,16 +85,38 @@ Create a `config.json` file in your plugin folder:
 
 ### Example 1: Daily Restarts at Specific Times
 
-{ "ScheduledRestarts": { "Enabled": true, "Times": ["06:00:00", "14:00:00", "22:00:00"] }, "PreRestartWarning": 300, "RestartMessage": "Server restarting in {0} seconds!" }
+```json
+{ 
+   "ScheduledRestarts": { "Enabled": true, 
+   "Times": ["06:00:00", "14:00:00", "22:00:00"] }, 
+   "PreRestartWarning": 300, 
+   "RestartMessage": "Server restarting in {0} seconds!" 
+}
+```
 
 ### Example 2: Restart Every 2 Hours
 
-{ "IntervalRestarts": { "Enabled": true, "IntervalMinutes": 120, "FirstRestartDelay": 30 } }
+```json
+{ 
+   "IntervalRestarts": { 
+   "Enabled": true,
+   "IntervalMinutes": 120,
+   "FirstRestartDelay": 30 
+   } 
+}
+```
 
 ### Example 3: With Discord Notifications
 
-{ "Discord": { "Enabled": true, "WebhookUrl": "https://discord.com/api/webhooks/YOUR_ID/YOUR_TOKEN", "NotifyOnRestart": true } }
-
+```json
+{ 
+   "Discord": { 
+   "Enabled": true, 
+   "WebhookUrl": "https://discord.com/api/webhooks/YOUR_ID/YOUR_TOKEN", 
+   "NotifyOnRestart": true 
+   } 
+}
+```
 
 ---
 
@@ -114,14 +144,15 @@ Create a `config.json` file in your plugin folder:
 
 ## 📂 File Structure
 
-SmartRestart/ 
-├── SmartRestart.dll              # Main plugin 
-├── config.json                   # Configuration file 
-├── lang/                         # Language files   
-│   ├── en.json                   # English  
-│   └── he.json                   # Hebrew
-└── MySqlConnector.dll            # Database support
-
+```
+SmartRestart/
+├── SmartRestart.dll      # Main plugin 
+├── config.json           # Configuration file 
+├── lang/                 # Language files   
+│   ├── en.json           # English  
+│   └── he.json           # Hebrew
+└── MySqlConnector.dll    # Database support
+```
 
 ---
 
@@ -145,21 +176,6 @@ Having issues? We're here to help!
 | 🐛 [Issues](https://github.com/afikpr123/CS2-SmartRestart/issues) | Report bugs |
 | 💬 [Discussions](https://github.com/afikpr123/CS2-SmartRestart/discussions) | Ask questions |
 | 🔒 [Security](SECURITY.md) | Report vulnerabilities |
-
----
-
-## 📊 Community
-
-SmartRestart is trusted by **hundreds of servers** worldwide:
-
-- 🎮 Community servers (10-128 players)
-- 🏆 Competitive leagues and tournaments
-- 🎯 Esports organizations
-- 🌍 International server operators
-
-**99.9% uptime · Trusted by the community**
-
----
 
 ## 📄 License
 
