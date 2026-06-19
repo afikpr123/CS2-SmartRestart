@@ -175,7 +175,6 @@ Having issues? We're here to help!
 | 📖 [Wiki](https://github.com/afikpr123/CS2-SmartRestart/wiki) | Full documentation |
 | 🐛 [Issues](https://github.com/afikpr123/CS2-SmartRestart/issues) | Report bugs |
 | 💬 [Discussions](https://github.com/afikpr123/CS2-SmartRestart/discussions) | Ask questions |
-| 🔒 [Security](SECURITY.md) | Report vulnerabilities |
 
 ## 📄 License
 
