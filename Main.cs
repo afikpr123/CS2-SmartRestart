@@ -15,7 +15,7 @@ namespace SmartRestart;
 public class SmartRestartPlugin : BasePlugin
 {
     public override string ModuleName => "Smart Restart Plugin";
-    public override string ModuleVersion => "1.0.1";
+    public override string ModuleVersion => "1.0.2";
     public override string ModuleAuthor => "Dipsy";
 
     private SmartRestartConfig _config = null!;
@@ -415,20 +415,25 @@ public class SmartRestartPlugin : BasePlugin
                     try
                     {
                         _logger?.Log($"Executing: host_workshop_map {workshopId}");
-                        Server.ExecuteCommand($"host_workshop_map {workshopId}");
+                        var command = $"host_workshop_map {workshopId}";
+                        Server.ExecuteCommand(command);
                         _logger?.Log("Workshop map change command executed");
+                        SendCommandExecutionDiscordStatus("Empty server map change", command, true);
 
                         // Fallback attempt for environments where workshop command may not resolve.
                         AddTimer(3.0f, () =>
                         {
                             try
                             {
-                                _logger?.LogWarning($"Workshop fallback: executing map {currentMap}");
-                                Server.ExecuteCommand($"map {currentMap}");
+                                var fallbackCommand = $"map {currentMap}";
+                                _logger?.LogWarning($"Workshop fallback: executing {fallbackCommand}");
+                                Server.ExecuteCommand(fallbackCommand);
+                                SendCommandExecutionDiscordStatus("Workshop map fallback", fallbackCommand, true);
                             }
                             catch (Exception fallbackEx)
                             {
                                 _logger?.LogError($"Workshop fallback map command failed: {fallbackEx.Message}");
+                                SendCommandExecutionDiscordStatus("Workshop map fallback", $"map {currentMap}", false, fallbackEx.Message);
                             }
                         });
                     }
@@ -436,16 +441,20 @@ public class SmartRestartPlugin : BasePlugin
                     {
                         _logger?.LogError($"Failed to execute workshop map change: {ex.Message}");
                         Console.WriteLine($"[SmartRestart] ERROR: Failed to execute workshop map change: {ex.Message}");
+                        SendCommandExecutionDiscordStatus("Empty server map change", $"host_workshop_map {workshopId}", false, ex.Message);
 
                         // Requested fallback behavior
                         try
                         {
-                            _logger?.LogWarning($"Falling back to map command: map {currentMap}");
-                            Server.ExecuteCommand($"map {currentMap}");
+                            var fallbackCommand = $"map {currentMap}";
+                            _logger?.LogWarning($"Falling back to map command: {fallbackCommand}");
+                            Server.ExecuteCommand(fallbackCommand);
+                            SendCommandExecutionDiscordStatus("Empty server map fallback", fallbackCommand, true);
                         }
                         catch (Exception fallbackEx)
                         {
                             _logger?.LogError($"Fallback map command also failed: {fallbackEx.Message}");
+                            SendCommandExecutionDiscordStatus("Empty server map fallback", $"map {currentMap}", false, fallbackEx.Message);
                         }
                     }
                 });
@@ -457,14 +466,17 @@ public class SmartRestartPlugin : BasePlugin
                 {
                     try
                     {
-                        _logger?.Log($"Executing: map {currentMap}");
-                        Server.ExecuteCommand($"map {currentMap}");
+                        var command = $"map {currentMap}";
+                        _logger?.Log($"Executing: {command}");
+                        Server.ExecuteCommand(command);
                         _logger?.Log("Map change command executed");
+                        SendCommandExecutionDiscordStatus("Empty server map change", command, true);
                     }
                     catch (Exception ex)
                     {
                         _logger?.LogError($"Failed to execute map change: {ex.Message}");
                         Console.WriteLine($"[SmartRestart] ERROR: Failed to execute map change: {ex.Message}");
+                        SendCommandExecutionDiscordStatus("Empty server map change", $"map {currentMap}", false, ex.Message);
                     }
                 });
             }
@@ -835,6 +847,7 @@ public class SmartRestartPlugin : BasePlugin
                 _logger?.Log("Restart command executed successfully - server should restart");
                 Console.WriteLine($"[SmartRestart] Restart command executed successfully");
                 Console.WriteLine($"[SmartRestart] If server doesn't restart, check that RestartCommand in config.json is correct for your hosting provider");
+                SendCommandExecutionDiscordStatus("Restart command", _config.RestartCommand, true, null, reason, initiator);
             }
             catch (Exception ex)
             {
@@ -843,8 +856,38 @@ public class SmartRestartPlugin : BasePlugin
                 Console.WriteLine($"[SmartRestart] Command: {_config.RestartCommand}");
                 Console.WriteLine($"[SmartRestart] Error: {ex.Message}");
                 Console.WriteLine($"[SmartRestart] Stack trace: {ex.StackTrace}");
+                SendCommandExecutionDiscordStatus("Restart command", _config.RestartCommand, false, ex.Message, reason, initiator);
             }
         });
+    }
+
+    private void SendCommandExecutionDiscordStatus(string action, string command, bool succeeded, string? errorMessage = null, string? reason = null, string? initiator = null)
+    {
+        if (!_config.DiscordWebhook.Enabled || string.IsNullOrEmpty(_config.DiscordWebhook.WebhookUrl))
+            return;
+
+        var title = succeeded
+            ? $"{action} executed"
+            : $"{action} failed";
+
+        var description = new StringBuilder();
+        description.AppendLine($"Command: `{command}`");
+        description.AppendLine($"Status: {(succeeded ? "Success" : "Failed")}");
+
+        if (!string.IsNullOrWhiteSpace(reason))
+            description.AppendLine($"Reason: {reason}");
+
+        if (!string.IsNullOrWhiteSpace(initiator))
+            description.AppendLine($"Initiated by: {initiator}");
+
+        if (!succeeded && !string.IsNullOrWhiteSpace(errorMessage))
+            description.AppendLine($"Error: {errorMessage}");
+
+        _ = _discordWebhook?.SendDiscordWebhook(
+            title,
+            description.ToString(),
+            succeeded ? 3066993 : 15158332
+        );
     }
 
     private void StartContinuousCenterCountdown(float totalSeconds)
