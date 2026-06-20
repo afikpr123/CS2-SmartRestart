@@ -18,7 +18,12 @@
 
 **Expected Console Output:**
 ```
-[SmartRestart] Plugin loaded successfully!
+====================================================
+ SMARTRESTART STARTUP
+====================================================
+...
+Next scheduled restart: ...
+SmartRestart ready.
 ```
 
 </td>
@@ -104,7 +109,7 @@ Config file not created on first run
 - ✅ Hour is 0-23 (24-hour format)
 - ✅ Minute is 0-59
 - ✅ Server timezone matches expected time
-- ✅ Console shows: `[SmartRestart] Next scheduled restart: ...`
+- ✅ Startup table shows: `Next scheduled restart: ...`
 
 </td>
 </tr>
@@ -236,7 +241,7 @@ date
     "Host": "localhost",
     "Port": 3306,
     "Database": "cs2_server",
-    "User": "your_user",
+    "Username": "your_user",
     "Password": "your_password"
   }
 }
@@ -296,7 +301,7 @@ WHERE player_steamid = 'STEAM_1:0:123456';
 **Common issues:**
 - Wrong Steam ID format
 - Typo in flags column
-- `RequiredFlags` config doesn't match player's flags
+- `RequiredPermission` config doesn't match player's flags
 - Database integration disabled
 
 **Temporary bypass (testing only):**
@@ -470,9 +475,9 @@ If you see this but server doesn't restart, **the restart method is the issue**,
 
 ---
 
-## 🤖 Smart Empty Restart Issues
+## 🤖 Empty Server Map Refresh Issues
 
-### Empty Server Not Auto-Restarting
+### Empty Server Not Changing Map
 
 <table>
 <tr>
@@ -486,34 +491,34 @@ If you see this but server doesn't restart, **the restart method is the issue**,
 ```json
 {
   "EnableAutoRestart": true,
-  "DelayAfterLastPlayerLeaves": 60,
+  "EmptyServerBehavior": {
+    "Enabled": true,
+    "DelaySeconds": 180,
+    "ExecuteOnceUntilPlayerJoins": true,
+    "SkipIfScheduledRestartWithinMinutes": 15
+  },
   "MinimumUptimeMinutes": 5
 }
 ```
 
 **Requirements:**
 - ✅ Server must be empty (0 players)
-- ✅ Minimum uptime reached (default 5 minutes)
-- ✅ Smart restart constraints met (if enabled)
-- ✅ Cooldown period passed (if configured)
+- ✅ EmptyServerBehavior enabled
+- ✅ DelaySeconds elapsed
+- ✅ Not too close to scheduled restart
 
-**Smart features preventing restart:**
+**If map change runs once and stops while empty:**
+- This is expected when `ExecuteOnceUntilPlayerJoins` is `true`.
+- It prevents spam during long empty periods.
+
+**For testing (faster):**
 ```json
 {
-  "SmartEmptyRestart": {
+  "EmptyServerBehavior": {
     "Enabled": true,
-    "RequireMinimumSessions": true,
-    "MinimumCompletedSessions": 2
-  }
-}
-```
-
-**For testing, disable smart features:**
-```json
-{
-  "MinimumUptimeMinutes": 1,
-  "SmartEmptyRestart": {
-    "Enabled": false
+    "DelaySeconds": 10,
+    "ExecuteOnceUntilPlayerJoins": true,
+    "SkipIfScheduledRestartWithinMinutes": 1
   }
 }
 ```
@@ -526,14 +531,21 @@ If you see this but server doesn't restart, **the restart method is the issue**,
 
 ## 🔍 Debug & Logging
 
-### Enable Detailed Console Logging
+### Enable Detailed Debug Logging
 
-Watch console during operations to see what's happening:
+Debug logs are disabled by default for performance. Enable them only while troubleshooting:
+
+```json
+{
+  "Logging": {
+    "DebugEnabled": true
+  }
+}
+```
+
+Then reload the plugin and watch console/log output:
 
 ```
-[SmartRestart] Plugin loaded successfully!
-[SmartRestart] Loaded language: en
-[SmartRestart] Connected to database successfully
 [SmartRestart] Checking for scheduled restarts...
 [SmartRestart] Next scheduled restart: 06:00 (Morning restart)
 [SmartRestart] Sending warning: Server restart in 5 minutes
@@ -546,7 +558,7 @@ Watch console during operations to see what's happening:
 
 | Message | Meaning |
 |---------|---------|
-| `Plugin loaded successfully!` | ✅ Plugin working |
+| `SMARTRESTART STARTUP` | ✅ Plugin working |
 | `Failed to connect to database` | ❌ Database issue |
 | `Next scheduled restart: ...` | ✅ Schedule loaded |
 | `Sending warning: ...` | ✅ Warnings working |
@@ -600,7 +612,8 @@ Check specific guides for:
 
 ### 🔍 **Console Logs**
 Enable debug mode:
-- Watch console output
+- Set `"Logging": { "DebugEnabled": true }`
+- Watch console output and log file
 - Look for error messages
 - Check timestamps
 - Note warning patterns

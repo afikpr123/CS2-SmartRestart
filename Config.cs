@@ -5,34 +5,19 @@ namespace SmartRestart;
 public class SmartRestartConfig
 {
     [JsonPropertyName("Language")]
-    public string Language { get; set; } = "en"; // Available: en, ar, es, fr, de, he
+    public string Language { get; set; } = "en"; // Available: en, he
 
     [JsonPropertyName("EnableAutoRestart")]
     public bool EnableAutoRestart { get; set; } = true;
 
-    [JsonPropertyName("DelayAfterLastPlayerLeaves")]
-    public int DelayAfterLastPlayerLeaves { get; set; } = 60;
-
     [JsonPropertyName("MinimumUptimeMinutes")]
     public int MinimumUptimeMinutes { get; set; } = 5;
 
-    [JsonPropertyName("MinimumUptimeForEmptyRestartHours")]
-    public int MinimumUptimeForEmptyRestartHours { get; set; } = 4;
-
-    [JsonPropertyName("EmptyRestartCooldownMinutes")]
-    public int EmptyRestartCooldownMinutes { get; set; } = 30;
-
-    [JsonPropertyName("MinimumPlayersBeforeEmptyRestart")]
-    public int MinimumPlayersBeforeEmptyRestart { get; set; } = 1;
-
-    [JsonPropertyName("RequirePlayerActivityForEmptyRestart")]
-    public bool RequirePlayerActivityForEmptyRestart { get; set; } = true;
-
-    [JsonPropertyName("SmartEmptyRestart")]
-    public SmartEmptyRestartConfig SmartEmptyRestart { get; set; } = new();
-
     [JsonPropertyName("ScheduledRestarts")]
     public List<ScheduledRestart> ScheduledRestarts { get; set; } = new();
+
+    [JsonPropertyName("EmptyServerBehavior")]
+    public EmptyServerBehaviorConfig EmptyServerBehavior { get; set; } = new();
 
     [JsonPropertyName("WarningMessages")]
     public WarningMessagesConfig WarningMessages { get; set; } = new();
@@ -48,6 +33,9 @@ public class SmartRestartConfig
 
     [JsonPropertyName("Database")]
     public DatabaseConfig Database { get; set; } = new();
+
+    [JsonPropertyName("Logging")]
+    public LoggingConfig Logging { get; set; } = new();
 }
 
 public class ScheduledRestart
@@ -210,6 +198,15 @@ public class DatabaseConfig
 
     [JsonPropertyName("RequiredPermission")]
     public string RequiredPermission { get; set; } = "@css/smartrestart";
+
+    [JsonPropertyName("PermissionCacheSeconds")]
+    public int PermissionCacheSeconds { get; set; } = 60;
+}
+
+public class LoggingConfig
+{
+    [JsonPropertyName("DebugEnabled")]
+    public bool DebugEnabled { get; set; } = false;
 }
 
 public class ManualEmbedConfig
@@ -251,54 +248,24 @@ public class ManualEmbedConfig
     }
 }
 
-public class SmartEmptyRestartConfig
+public class EmptyServerBehaviorConfig
 {
     [JsonPropertyName("Enabled")]
     public bool Enabled { get; set; } = true;
 
-    [JsonPropertyName("Strategy")]
-    public string Strategy { get; set; } = "Smart"; // Options: Immediate, Smart
+    [JsonPropertyName("DelaySeconds")]
+    public int DelaySeconds { get; set; } = 180;
 
-    [JsonPropertyName("PeakHours")]
-    public PeakHoursConfig PeakHours { get; set; } = new();
+    [JsonPropertyName("ExecuteOnceUntilPlayerJoins")]
+    public bool ExecuteOnceUntilPlayerJoins { get; set; } = true;
 
-    [JsonPropertyName("SessionBased")]
-    public SessionBasedConfig SessionBased { get; set; } = new();
+    [JsonPropertyName("RepeatWhileStillEmpty")]
+    public bool RepeatWhileStillEmpty { get; set; } = false;
 
-    [JsonPropertyName("MaximumEmptyWaitMinutes")]
-    public int MaximumEmptyWaitMinutes { get; set; } = 30;
-}
+    [JsonPropertyName("RepeatIntervalSeconds")]
+    public int RepeatIntervalSeconds { get; set; } = 28800;
 
-public class PeakHoursConfig
-{
-    [JsonPropertyName("Enabled")]
-    public bool Enabled { get; set; } = true;
-
-    [JsonPropertyName("StartHour")]
-    public int StartHour { get; set; } = 18; // 6 PM
-
-    [JsonPropertyName("EndHour")]
-    public int EndHour { get; set; } = 23; // 11 PM
-
-    [JsonPropertyName("DelayMinutes")]
-    public int DelayMinutes { get; set; } = 15;
-
-    [JsonPropertyName("OffPeakDelayMinutes")]
-    public int OffPeakDelayMinutes { get; set; } = 3;
-}
-
-public class SessionBasedConfig
-{
-    [JsonPropertyName("Enabled")]
-    public bool Enabled { get; set; } = true;
-
-    [JsonPropertyName("MinimumSessionLengthMinutes")]
-    public int MinimumSessionLengthMinutes { get; set; } = 5;
-
-    [JsonPropertyName("MinimumTotalPlaytimeMinutes")]
-    public int MinimumTotalPlaytimeMinutes { get; set; } = 30;
-
-    [JsonPropertyName("RecentActivityWindowMinutes")]
-    public int RecentActivityWindowMinutes { get; set; } = 10;
+    [JsonPropertyName("SkipIfScheduledRestartWithinMinutes")]
+    public int SkipIfScheduledRestartWithinMinutes { get; set; } = 15;
 }
 

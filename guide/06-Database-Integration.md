@@ -57,9 +57,10 @@ Edit `config.json`:
     "Host": "localhost",
     "Port": 3306,
     "Database": "cs2_server",
-    "User": "your_user",
+    "Username": "your_user",
     "Password": "your_password",
-    "RequiredFlags": "@css/smartrestart"
+    "RequiredPermission": "@css/smartrestart",
+    "PermissionCacheSeconds": 60
   }
 }
 ```
@@ -72,9 +73,10 @@ Edit `config.json`:
 | **Host** | Database server address | `localhost` or `192.168.1.100` |
 | **Port** | MySQL port | `3306` (default) |
 | **Database** | SimpleAdmin database name | `cs2_server` |
-| **User** | Database username | `cs2_user` |
+| **Username** | Database username | `cs2_user` |
 | **Password** | Database password | `your_secure_password` |
-| **RequiredFlags** | Permission flag(s) required | `@css/smartrestart` |
+| **RequiredPermission** | Permission flag required | `@css/smartrestart` |
+| **PermissionCacheSeconds** | Cache command permission results to reduce repeated queries | `60` |
 
 ---
 
@@ -90,9 +92,10 @@ For servers running MySQL on the same machine:
     "Host": "localhost",
     "Port": 3306,
     "Database": "cs2_simpleadmin",
-    "User": "cs2_user",
+    "Username": "cs2_user",
     "Password": "MySecurePassword123",
-    "RequiredFlags": "@css/smartrestart"
+    "RequiredPermission": "@css/smartrestart",
+    "PermissionCacheSeconds": 60
   }
 }
 ```
@@ -112,9 +115,10 @@ For servers connecting to external database:
     "Host": "db.yourhost.com",
     "Port": 3306,
     "Database": "cs2_simpleadmin",
-    "User": "remote_user",
+    "Username": "remote_user",
     "Password": "RemotePassword456",
-    "RequiredFlags": "@css/smartrestart"
+    "RequiredPermission": "@css/smartrestart",
+    "PermissionCacheSeconds": 60
   }
 }
 ```
@@ -129,19 +133,18 @@ Allow multiple admin groups to use commands:
 
 ```json
 {
-  "RequiredFlags": "@css/smartrestart,@css/root"
+  "RequiredPermission": "@css/smartrestart"
 }
 ```
 
-**Result:** Admins with **either** `@css/smartrestart` **OR** `@css/root` can use commands.
+**Result:** Admins with `@css/smartrestart` can use commands. Root admins are also allowed by the permission checker.
 
 #### Common Permission Combinations
 
 ```json
-"@css/smartrestart"                    // Only SmartRestart admins
-"@css/smartrestart,@css/root"          // SmartRestart OR Root admins
-"@css/smartrestart,@css/admin"         // SmartRestart OR Admin flag
-"@css/root"                            // Only Root admins
+"@css/smartrestart"                    // SmartRestart admins
+"@css/admin"                           // Admin flag
+"@css/root"                            // Root admins
 ```
 
 ---
@@ -267,7 +270,7 @@ SmartRestart reads from SimpleAdmin's standard tables:
 **Requirements:**
 1. Player must be in `sa_admins` table
 2. Player's Steam64 ID must match
-3. Player must have `RequiredFlags` in their flags column
+3. Player must have the flag configured in `RequiredPermission`
 
 **Check SimpleAdmin Database:**
 ```sql
@@ -277,7 +280,7 @@ SELECT * FROM sa_admins WHERE player_steamid = 'STEAM_1:0:123456';
 **Common Issues:**
 - Wrong Steam ID format
 - Missing or typo in flags
-- `RequiredFlags` doesn't match player's flags
+- `RequiredPermission` doesn't match player's flags
 
 </td>
 </tr>
@@ -314,7 +317,7 @@ Set `Enabled` to `false`:
 2. **Reload** plugin: `css_plugins reload SmartRestart`
 3. **Check** console for connection success:
    ```
-   [SmartRestart] Connected to database successfully
+   Database integration         | ✔      | Enabled (...)
    ```
 4. **Test** with authorized admin: `!serverrestart`
 5. **Test** with unauthorized player: Should see permission error
@@ -374,7 +377,7 @@ If you already have SimpleAdmin installed, SmartRestart will use the same databa
 
 **Steps:**
 1. Use same database settings as SimpleAdmin
-2. Set `RequiredFlags` to your admin flag
+2. Set `RequiredPermission` to your admin flag
 3. Reload plugin
 4. Done! ✅
 

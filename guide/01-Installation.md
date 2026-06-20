@@ -47,7 +47,11 @@ The plugin will automatically:
 ### 4️⃣ **Verify Installation**
 Check your console for:
 ```
-[SmartRestart] Plugin loaded successfully!
+====================================================
+ SMARTRESTART STARTUP
+====================================================
+...
+SmartRestart ready.
 ```
 
 ---

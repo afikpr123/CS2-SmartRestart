@@ -70,40 +70,15 @@ A `config.json` file will auto generate into your plugin folder:
 
 ## 🎮 Usage Examples
 
-### Example of a `config.json` file with advanced smart restart settings:
+### Example `config.json`
 
 ```json
 {
-  // Auto-restart settings
-  "EnableAutoRestart": true, // Restart server automatically when empty
-  "DelayAfterLastPlayerLeaves": 60, // Seconds to wait after last player leaves (used if Smart restart disabled)
-  "MinimumUptimeMinutes": 5, // Minimum uptime (minutes) for MANUAL restarts - prevents accidental rapid restarts
-  "MinimumUptimeForEmptyRestartHours": 4, // Minimum uptime (hours) for AUTO empty-server restarts - prevents spam
+  "Language": "en",
 
-  // Smart empty restart settings
-  "EmptyRestartCooldownMinutes": 30, // Cooldown between empty restarts - prevents restart spam
-  "MinimumPlayersBeforeEmptyRestart": 1, // Server must have had this many players before restarting when empty
-  "RequirePlayerActivityForEmptyRestart": true, // Only restart if server had player activity since last restart
-
-  // Advanced smart restart (time-aware + session-based)
-  "SmartEmptyRestart": {
-    "Enabled": true, // Enable advanced smart restart logic
-    "Strategy": "Smart", // Options: Immediate, Smart
-    "PeakHours": {
-      "Enabled": true,
-      "StartHour": 18, // 24-hour format (6 PM)
-      "EndHour": 23, // 11 PM
-      "DelayMinutes": 15, // Wait 15 minutes during peak hours (players might return)
-      "OffPeakDelayMinutes": 3 // Fast restart during off-peak (3 minutes)
-    },
-    "SessionBased": {
-      "Enabled": true,
-      "MinimumSessionLengthMinutes": 5, // Only count sessions longer than 5 minutes
-      "MinimumTotalPlaytimeMinutes": 30, // Server must have 30 min of playtime before restart
-      "RecentActivityWindowMinutes": 10 // Delay restart if player left within 10 minutes
-    },
-    "MaximumEmptyWaitMinutes": 30 // Never wait longer than 30 minutes
-  },
+  // Empty-server behavior refreshes the current map. It does not restart the server.
+  "EnableAutoRestart": true,
+  "MinimumUptimeMinutes": 5,
 
   // Scheduled restarts
   "ScheduledRestarts": [
@@ -115,11 +90,20 @@ A `config.json` file will auto generate into your plugin folder:
     },
     {
       "Enabled": true,
-      "Hour": 18,
+      "Hour": 0,
       "Minute": 0,
-      "Description": "Evening restart"
+      "Description": "Night restart"
     }
   ],
+
+  "EmptyServerBehavior": {
+    "Enabled": true,
+    "DelaySeconds": 21600,
+    "ExecuteOnceUntilPlayerJoins": true,
+    "RepeatWhileStillEmpty": true,
+    "RepeatIntervalSeconds": 21600,
+    "SkipIfScheduledRestartWithinMinutes": 20
+  },
 
   // Warning messages before restart
   "WarningMessages": {
@@ -180,10 +164,16 @@ A `config.json` file will auto generate into your plugin folder:
     "Enabled": false, // Enable to use SimpleAdmin permissions for !serverrestart command
     "Host": "localhost",
     "Port": 3306,
-    "Database": "cs2_server",
-    "Username": "user",
-    "Password": "password",
-    "RequiredPermission": "@css/smartrestart" // Permission flag checked in sa_admins_groups and sa_admins tables
+    "Database": "cs2_simpleadmin",
+    "Username": "root",
+    "Password": "",
+    "RequiredPermission": "@css/smartrestart",
+    "PermissionCacheSeconds": 60
+  },
+
+  // Logging
+  "Logging": {
+    "DebugEnabled": false
   }
 }
 ```

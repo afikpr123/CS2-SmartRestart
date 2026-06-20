@@ -9,11 +9,15 @@ public class DatabaseManager
     private readonly string _connectionString;
     private int? _serverId = null;
     private readonly string _hostname;
+    private readonly bool _startupTableMode;
+    private readonly Dictionary<string, (bool HasPermission, DateTime ExpiresAt)> _permissionCache = new();
+    private readonly object _permissionCacheLock = new();
 
-    public DatabaseManager(DatabaseConfig config, string hostname)
+    public DatabaseManager(DatabaseConfig config, string hostname, bool startupTableMode = false)
     {
         _config = config;
         _hostname = hostname;
+        _startupTableMode = startupTableMode;
         // Add connection string options to avoid threading issues
         _connectionString = $"Server={config.Host};Port={config.Port};Database={config.Database};Uid={config.Username};Pwd={config.Password};AllowUserVariables=True;UseCompression=False;";
     }
@@ -24,24 +28,38 @@ public class DatabaseManager
         System.Console.WriteLine(message);
     }
 
+    private static void SafeLogVerbose(string message)
+    {
+        // Intentionally silent in normal operation. Keep this method as a single
+        // switch point if verbose database tracing is needed during troubleshooting.
+    }
+
+    private void SafeLogDuringStartup(string message)
+    {
+        if (!_startupTableMode)
+        {
+            SafeLog(message);
+        }
+    }
+
     public async Task<bool> InitializeAsync()
     {
         try
         {
-            SafeLog($"[SmartRestart] Connecting to database: {_config.Host}:{_config.Port} / Database: {_config.Database} / User: {_config.Username}");
+            SafeLogDuringStartup($"[SmartRestart] Connecting to database: {_config.Host}:{_config.Port} / Database: {_config.Database} / User: {_config.Username}");
 
             await using var connection = new MySqlConnection(_connectionString);
             await connection.OpenAsync().ConfigureAwait(false);
 
-            SafeLog($"[SmartRestart] ✅ Database connection successful!");
+            SafeLogDuringStartup($"[SmartRestart] ✅ Database connection successful!");
 
             if (string.IsNullOrWhiteSpace(_hostname))
             {
-                SafeLog($"[SmartRestart] WARNING: Server hostname is empty!");
+                SafeLogDuringStartup($"[SmartRestart] WARNING: Server hostname is empty!");
                 return false;
             }
 
-            SafeLog($"[SmartRestart] Looking for hostname: {_hostname}");
+            SafeLogDuringStartup($"[SmartRestart] Looking for hostname: {_hostname}");
 
             // Find server ID by hostname in sa_servers table
             var query = "SELECT id FROM sa_servers WHERE hostname = @hostname LIMIT 1";
@@ -52,13 +70,13 @@ public class DatabaseManager
             if (result != null)
             {
                 _serverId = Convert.ToInt32(result);
-                SafeLog($"[SmartRestart] ✅ Found Server ID: {_serverId}");
+                SafeLogDuringStartup($"[SmartRestart] ✅ Found Server ID: {_serverId}");
                 return true;
             }
             else
             {
-                SafeLog($"[SmartRestart] WARNING: Hostname '{_hostname}' not found in sa_servers table!");
-                SafeLog($"[SmartRestart] Please ensure your server's hostname matches what's in SimpleAdmin's sa_servers table.");
+                SafeLogDuringStartup($"[SmartRestart] WARNING: Hostname '{_hostname}' not found in sa_servers table!");
+                SafeLogDuringStartup($"[SmartRestart] Please ensure your server's hostname matches what's in SimpleAdmin's sa_servers table.");
                 return false;
             }
         }
@@ -105,16 +123,21 @@ public class DatabaseManager
             return false;
         }
 
+        if (TryGetCachedPermission(steamId, out var cachedPermission))
+        {
+            return cachedPermission;
+        }
+
         try
         {
-            SafeLog($"[SmartRestart] Checking permissions for SteamID: {steamId}");
+            SafeLogVerbose($"[SmartRestart] Checking permissions for SteamID: {steamId}");
 
             await using var connection = new MySqlConnection(_connectionString);
             await connection.OpenAsync().ConfigureAwait(false);
-            SafeLog("[SmartRestart] Database connection opened");
+            SafeLogVerbose("[SmartRestart] Database connection opened");
 
             // Step 1: Find all groups in sa_admins_groups that have the required permission
-            SafeLog($"[SmartRestart] Step 1: Checking sa_admins_groups for groups with permission '{_config.RequiredPermission}'");
+            SafeLogVerbose($"[SmartRestart] Step 1: Checking sa_admins_groups for groups with permission '{_config.RequiredPermission}'");
 
             var groupsQuery = @"
                 SELECT id, name, flags, server
@@ -148,7 +171,7 @@ public class DatabaseManager
                     // Skip if id or flags are empty
                     if (string.IsNullOrEmpty(groupId) || string.IsNullOrEmpty(groupFlags))
                     {
-                        SafeLog($"[SmartRestart] Skipping group with empty id or flags: id={groupId}");
+                        SafeLogVerbose($"[SmartRestart] Skipping group with empty id or flags: id={groupId}");
                         continue;
                     }
 
@@ -167,7 +190,7 @@ public class DatabaseManager
                         }
                     }
 
-                    SafeLog($"[SmartRestart] Found authorized group: id={groupId}, name={groupName}, server={groupServerId}");
+                    SafeLogVerbose($"[SmartRestart] Found authorized group: id={groupId}, name={groupName}, server={groupServerId}");
                     authorizedGroups.Add((groupId, groupName, groupServerId));
                 }
                 catch (Exception ex)
@@ -180,14 +203,15 @@ public class DatabaseManager
 
             if (authorizedGroups.Count == 0)
             {
-                SafeLog($"[SmartRestart] No groups found with permission '{_config.RequiredPermission}'");
+                SafeLogVerbose($"[SmartRestart] No groups found with permission '{_config.RequiredPermission}'");
+                CachePermission(steamId, false);
                 return false;
             }
 
-            SafeLog($"[SmartRestart] Found {authorizedGroups.Count} authorized group(s)");
+            SafeLogVerbose($"[SmartRestart] Found {authorizedGroups.Count} authorized group(s)");
 
             // Step 2: Check if player is in sa_admins and belongs to any of these groups
-            SafeLog($"[SmartRestart] Step 2: Checking sa_admins for player {steamId}");
+            SafeLogVerbose($"[SmartRestart] Step 2: Checking sa_admins for player {steamId}");
 
             var adminQuery = @"
                 SELECT flags, server_id, servers_groups, ends
@@ -203,7 +227,8 @@ public class DatabaseManager
 
             if (!await adminReader.ReadAsync())
             {
-                SafeLog($"[SmartRestart] Player {steamId} not found in sa_admins table");
+                SafeLogVerbose($"[SmartRestart] Player {steamId} not found in sa_admins table");
+                CachePermission(steamId, false);
                 return false;
             }
 
@@ -213,13 +238,13 @@ public class DatabaseManager
 
             await adminReader.CloseAsync();
 
-            SafeLog($"[SmartRestart] Found admin: flags={flags}, server_id={serverId}, servers_groups={serversGroups}");
+            SafeLogVerbose($"[SmartRestart] Found admin: flags={flags}, server_id={serverId}, servers_groups={serversGroups}");
 
             // If servers_groups is empty/null, it means admin has access to all servers
             bool hasAccessToAllServers = string.IsNullOrEmpty(serversGroups);
             if (hasAccessToAllServers)
             {
-                SafeLog("[SmartRestart] Admin has empty servers_groups (access to ALL servers)");
+                SafeLogVerbose("[SmartRestart] Admin has empty servers_groups (access to ALL servers)");
             }
 
             // Step 3: Check if admin's flags match any authorized group ID
@@ -228,24 +253,26 @@ public class DatabaseManager
                 // Match admin's flags against the group's id (e.g., flags="#owner" matches id="#owner")
                 if (flags.Equals(groupId, StringComparison.OrdinalIgnoreCase))
                 {
-                    SafeLog($"[SmartRestart] Admin's flags '{flags}' matches authorized group '{groupId}' (name: {groupName})");
+                    SafeLogVerbose($"[SmartRestart] Admin's flags '{flags}' matches authorized group '{groupId}' (name: {groupName})");
 
                     // If admin has access to all servers, grant immediately
                     if (hasAccessToAllServers)
                     {
-                        SafeLog($"[SmartRestart] Permission GRANTED via group '{groupId}' (all servers access)");
+                        SafeLogVerbose($"[SmartRestart] Permission GRANTED via group '{groupId}' (all servers access)");
+                        CachePermission(steamId, true);
                         return true;
                     }
 
                     // Otherwise check server access
                     if (await CheckServerAccessAsync(groupServerId ?? serverId, connection))
                     {
-                        SafeLog($"[SmartRestart] Permission GRANTED via group '{groupId}'");
+                        SafeLogVerbose($"[SmartRestart] Permission GRANTED via group '{groupId}'");
+                        CachePermission(steamId, true);
                         return true;
                     }
                     else
                     {
-                        SafeLog($"[SmartRestart] Group '{groupId}' matches but server access DENIED");
+                        SafeLogVerbose($"[SmartRestart] Group '{groupId}' matches but server access DENIED");
                     }
                 }
             }
@@ -253,7 +280,7 @@ public class DatabaseManager
             // Step 4: Check if admin's servers_groups (ID) matches any authorized group ID
             if (!string.IsNullOrEmpty(serversGroups))
             {
-                SafeLog($"[SmartRestart] Checking admin's servers_groups: {serversGroups}");
+                SafeLogVerbose($"[SmartRestart] Checking admin's servers_groups: {serversGroups}");
 
                 // servers_groups can contain group IDs (could be numeric or string like "#owner")
                 var groupIdList = serversGroups.Split(',', StringSplitOptions.RemoveEmptyEntries)
@@ -265,59 +292,64 @@ public class DatabaseManager
                     var matchingGroup = authorizedGroups.FirstOrDefault(g => g.id.Equals(adminGroupId, StringComparison.OrdinalIgnoreCase));
                     if (matchingGroup != default)
                     {
-                        SafeLog($"[SmartRestart] Admin's servers_groups contains authorized group ID {adminGroupId} ('{matchingGroup.name}')");
+                        SafeLogVerbose($"[SmartRestart] Admin's servers_groups contains authorized group ID {adminGroupId} ('{matchingGroup.name}')");
 
                         // If admin has access to all servers, grant immediately
                         if (hasAccessToAllServers)
                         {
-                            SafeLog($"[SmartRestart] Permission GRANTED via servers_groups ID {adminGroupId} (all servers access)");
+                            SafeLogVerbose($"[SmartRestart] Permission GRANTED via servers_groups ID {adminGroupId} (all servers access)");
+                            CachePermission(steamId, true);
                             return true;
                         }
 
                         // Check server access
                         if (await CheckServerAccessAsync(matchingGroup.serverId ?? serverId, connection))
                         {
-                            SafeLog($"[SmartRestart] Permission GRANTED via servers_groups ID {adminGroupId}");
+                            SafeLogVerbose($"[SmartRestart] Permission GRANTED via servers_groups ID {adminGroupId}");
+                            CachePermission(steamId, true);
                             return true;
                         }
                         else
                         {
-                            SafeLog($"[SmartRestart] Group ID {adminGroupId} matches but server access DENIED");
+                            SafeLogVerbose($"[SmartRestart] Group ID {adminGroupId} matches but server access DENIED");
                         }
                     }
                 }
             }
 
             // Step 5: Check if admin has direct permission flags
-            SafeLog("[SmartRestart] Checking if admin has direct permission flags");
+            SafeLogVerbose("[SmartRestart] Checking if admin has direct permission flags");
             bool hasDirectPermission = flags.Contains(_config.RequiredPermission) || 
                                        flags.Contains("@css/root") || 
                                        flags.Contains("#css/root");
 
             if (hasDirectPermission)
             {
-                SafeLog("[SmartRestart] Admin has direct permission flag");
+                SafeLogVerbose("[SmartRestart] Admin has direct permission flag");
 
                 // If admin has access to all servers, grant immediately
                 if (hasAccessToAllServers)
                 {
-                    SafeLog("[SmartRestart] Direct permission GRANTED (all servers access)");
+                    SafeLogVerbose("[SmartRestart] Direct permission GRANTED (all servers access)");
+                    CachePermission(steamId, true);
                     return true;
                 }
 
                 // Otherwise check server access
                 if (await CheckServerAccessAsync(serverId, connection))
                 {
-                    SafeLog("[SmartRestart] Direct permission GRANTED");
+                    SafeLogVerbose("[SmartRestart] Direct permission GRANTED");
+                    CachePermission(steamId, true);
                     return true;
                 }
                 else
                 {
-                    SafeLog("[SmartRestart] Direct permission found but server access DENIED");
+                    SafeLogVerbose("[SmartRestart] Direct permission found but server access DENIED");
                 }
             }
 
-            SafeLog("[SmartRestart] Permission check FAILED - no valid permission found");
+            SafeLogVerbose("[SmartRestart] Permission check FAILED - no valid permission found");
+            CachePermission(steamId, false);
             return false;
         }
         catch (Exception ex)
@@ -333,28 +365,58 @@ public class DatabaseManager
         // If we couldn't detect our server ID, deny access for safety
         if (!_serverId.HasValue)
         {
-            SafeLog("[SmartRestart] Cannot verify server access: Server ID not detected");
+            SafeLogVerbose("[SmartRestart] Cannot verify server access: Server ID not detected");
             return false;
         }
 
-        SafeLog($"[SmartRestart] Checking server access: serverId={serverId}, currentServerId={_serverId}");
+        SafeLogVerbose($"[SmartRestart] Checking server access: serverId={serverId}, currentServerId={_serverId}");
 
         // If serverId is null or 0, it means "all servers"
         if (!serverId.HasValue || serverId.Value == 0)
         {
-            SafeLog("[SmartRestart] Server ID is null/0 (all servers) - GRANTED");
+            SafeLogVerbose("[SmartRestart] Server ID is null/0 (all servers) - GRANTED");
             return true;
         }
 
         // Check if it matches our server
         if (serverId.Value == _serverId.Value)
         {
-            SafeLog("[SmartRestart] Server ID matches - GRANTED");
+            SafeLogVerbose("[SmartRestart] Server ID matches - GRANTED");
             return true;
         }
 
-        SafeLog("[SmartRestart] Server ID does not match - DENIED");
+        SafeLogVerbose("[SmartRestart] Server ID does not match - DENIED");
         return false;
+    }
+
+    private bool TryGetCachedPermission(string steamId, out bool hasPermission)
+    {
+        hasPermission = false;
+        if (_config.PermissionCacheSeconds <= 0)
+            return false;
+
+        lock (_permissionCacheLock)
+        {
+            if (_permissionCache.TryGetValue(steamId, out var cached) && cached.ExpiresAt > DateTime.UtcNow)
+            {
+                hasPermission = cached.HasPermission;
+                return true;
+            }
+
+            _permissionCache.Remove(steamId);
+            return false;
+        }
+    }
+
+    private void CachePermission(string steamId, bool hasPermission)
+    {
+        if (_config.PermissionCacheSeconds <= 0)
+            return;
+
+        lock (_permissionCacheLock)
+        {
+            _permissionCache[steamId] = (hasPermission, DateTime.UtcNow.AddSeconds(_config.PermissionCacheSeconds));
+        }
     }
 
     public async Task<bool> TestConnectionAsync()

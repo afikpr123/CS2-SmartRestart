@@ -85,78 +85,44 @@ Configure how and when players receive restart warnings:
 
 ---
 
-## 🔄 Empty Server Restart
+## 🔄 Empty Server Behavior (No Restart)
 
-Control automatic restart behavior when the server is empty:
+When server is empty, SmartRestart can refresh the current map. It does **not** restart the server.
 
 ```json
 {
   "EnableAutoRestart": true,
-  "DelayAfterLastPlayerLeaves": 60,
+	"EmptyServerBehavior": {
+	"Enabled": true,
+	"DelaySeconds": 180,
+	"ExecuteOnceUntilPlayerJoins": true,
+	"SkipIfScheduledRestartWithinMinutes": 15
+  },
   "MinimumUptimeMinutes": 5
 }
 ```
 
 | Setting | Description | Recommended |
 |---------|-------------|-------------|
-| **EnableAutoRestart** | Enable empty-server restarts | `true` |
-| **DelayAfterLastPlayerLeaves** | Seconds to wait after last player | `60` |
+| **EnableAutoRestart** | Enable empty-server behavior | `true` |
+| **EmptyServerBehavior.Enabled** | Enable map refresh when empty | `true` |
+| **EmptyServerBehavior.DelaySeconds** | Delay before map refresh | `180` |
+| **EmptyServerBehavior.ExecuteOnceUntilPlayerJoins** | Prevent spam while server stays empty | `true` |
+| **EmptyServerBehavior.SkipIfScheduledRestartWithinMinutes** | Skip map refresh when scheduled restart is close | `15` |
 | **MinimumUptimeMinutes** | Minimum uptime before allowing restart | `5` |
 
-⚠️ **Safety:** Server won't restart immediately - it waits for the delay period.
+⚠️ **Safety:** Empty map refresh runs once and waits for a player join before running again.
 
 ---
 
-## 🧠 Smart Features (Optional)
+## 🧠 Smart Empty Behavior (Simple)
 
-Advanced intelligence for production servers:
+The plugin now keeps empty-server logic simple:
 
-```json
-{
-  "SmartEmptyRestart": {
-	"Enabled": true,
-	"MinimumUptimeForEmptyRestartHours": 4,
-	"EmptyRestartCooldownMinutes": 30,
-	"RequireMinimumSessions": true,
-	"MinimumCompletedSessions": 2,
-	"PeakHours": {
-	  "Enabled": true,
-	  "StartHour": 16,
-	  "EndHour": 23,
-	  "DelayMinutes": 10
-	}
-  }
-}
-```
-
-<table>
-<tr>
-<td width="40%">
-
-### 🎯 **Session Tracking**
-- Requires real player activity
-- Prevents restart spam
-- Tracks completed sessions
-
-</td>
-<td width="30%">
-
-### ⏰ **Peak Hours**
-- Longer delays during peak times
-- Smart timing adjustments
-- Configurable hours
-
-</td>
-<td width="30%">
-
-### 🛡️ **Cooldown System**
-- Prevents multiple restarts
-- Respects minimum uptime
-- Anti-spam protection
-
-</td>
-</tr>
-</table>
+- No empty-server restarts
+- One map refresh while server is empty
+- No repeated map-change spam
+- Scheduled restarts continue exactly as configured
 
 ---
 
@@ -220,9 +186,10 @@ Enable permission-based commands using SimpleAdmin database:
 	"Host": "localhost",
 	"Port": 3306,
 	"Database": "cs2_server",
-	"User": "your_user",
+	"Username": "your_user",
 	"Password": "your_password",
-	"RequiredFlags": "@css/smartrestart"
+	"RequiredPermission": "@css/smartrestart",
+	"PermissionCacheSeconds": 60
   }
 }
 ```
@@ -233,7 +200,9 @@ Enable permission-based commands using SimpleAdmin database:
 | **Host** | Database server address | `localhost` |
 | **Port** | MySQL port | `3306` |
 | **Database** | SimpleAdmin database name | - |
-| **RequiredFlags** | Permission flag for commands | `@css/smartrestart` |
+| **Username** | Database username | - |
+| **RequiredPermission** | Permission flag for commands | `@css/smartrestart` |
+| **PermissionCacheSeconds** | Cache permission results to reduce MySQL load | `60` |
 
 🔒 **Security:** Plugin uses **read-only** access - no writes to database.
 
@@ -250,8 +219,13 @@ Production-ready configuration with all features enabled:
   "Language": "en",
   "ChatPrefix": "[{gold}SmartRestart{default}]",
 
-  "EnableAutoRestart": true,
-  "DelayAfterLastPlayerLeaves": 60,
+	"EnableAutoRestart": true,
+  "EmptyServerBehavior": {
+	"Enabled": true,
+	"DelaySeconds": 180,
+	"ExecuteOnceUntilPlayerJoins": true,
+	"SkipIfScheduledRestartWithinMinutes": 15
+	},
   "MinimumUptimeMinutes": 5,
   "RestartCommand": "quit",
 
@@ -276,23 +250,6 @@ Production-ready configuration with all features enabled:
 	}
   ],
 
-  "SmartEmptyRestart": {
-	"Enabled": true,
-	"MinimumUptimeForEmptyRestartHours": 4,
-	"EmptyRestartCooldownMinutes": 30,
-	"RequireMinimumSessions": true,
-	"MinimumCompletedSessions": 2,
-	"RequireRecentActivity": true,
-	"RecentActivityWindowMinutes": 60,
-	"PeakHours": {
-	  "Enabled": true,
-	  "StartHour": 16,
-	  "EndHour": 23,
-	  "DelayMinutes": 10,
-	  "OffPeakDelayMinutes": 3
-	}
-  },
-
   "DiscordWebhook": {
 	"Enabled": true,
 	"WebhookUrl": "https://discord.com/api/webhooks/YOUR_WEBHOOK_URL",
@@ -305,12 +262,33 @@ Production-ready configuration with all features enabled:
 	"Host": "localhost",
 	"Port": 3306,
 	"Database": "cs2_server",
-	"User": "cs2_user",
+	"Username": "cs2_user",
 	"Password": "your_secure_password",
-	"RequiredFlags": "@css/smartrestart"
+	"RequiredPermission": "@css/smartrestart",
+	"PermissionCacheSeconds": 60
   }
 }
 ```
+
+---
+
+## Logging & Performance
+
+Keep debug logging disabled during normal operation. Enable it only while troubleshooting.
+
+```json
+{
+  "Logging": {
+	"DebugEnabled": false
+  }
+}
+```
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| **DebugEnabled** | Writes verbose scheduler/countdown/permission debug logs | `false` |
+
+Performance tip: `Database.PermissionCacheSeconds` defaults to `60`, which reduces repeated MySQL permission checks for restart commands.
 
 ---
 
