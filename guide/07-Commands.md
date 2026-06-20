@@ -172,9 +172,10 @@ Edit `config.json`:
     "Host": "localhost",
     "Port": 3306,
     "Database": "cs2_server",
-    "User": "your_user",
+    "Username": "your_user",
     "Password": "your_password",
-    "RequiredFlags": "@css/smartrestart"
+    "RequiredPermission": "@css/smartrestart",
+    "PermissionCacheSeconds": 60
   }
 }
 ```
@@ -218,7 +219,7 @@ WHERE player_steamid = 'STEAM_1:0:123456';
 1. Add player to `sa_admins` table
 2. Grant `@css/smartrestart` flag
 3. Verify database connection working
-4. Check `RequiredFlags` matches player's flags
+4. Check `RequiredPermission` matches player's flags
 
 </td>
 </tr>
@@ -278,7 +279,7 @@ Should show SmartRestart as loaded.
 - Network/firewall issue
 
 **Solutions:**
-1. Verify config: Host, Port, Database, User, Password
+1. Verify config: Host, Port, Database, Username, Password
 2. Test connection with MySQL client
 3. Check MySQL server status
 4. See [Database Integration Guide](06-Database-Integration.md)

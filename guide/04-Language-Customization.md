@@ -55,7 +55,7 @@ css_plugins reload SmartRestart
 ### 3. Verify
 Check console for:
 ```
-[SmartRestart] Loaded language: he
+| Language loaded              | ✔      | he (.../lang/he.json)
 ```
 
 💡 **Auto-Generation:** Missing language files are created automatically with English defaults.

@@ -38,6 +38,8 @@ packages/
 # Config files with sensitive data
 config.json
 **/config.json
+LOGGING.md
+**/LOGGING.md
 
 # Database
 *.db
@@ -86,3 +88,4 @@ SmartRestart-*.zip
 # Don't ignore example/template configs
 !config.example.json
 !config.template.json
+

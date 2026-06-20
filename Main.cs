@@ -1,11 +1,12 @@
 ﻿using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
-using CounterStrikeSharp.API.Modules.Commands;
-using CounterStrikeSharp.API.Modules.Timers;
 using CounterStrikeSharp.API.Modules.Admin;
+using CounterStrikeSharp.API.Modules.Commands;
 using CounterStrikeSharp.API.Modules.Cvars;
 using CounterStrikeSharp.API.Modules.Entities.Constants;
+using CounterStrikeSharp.API.Modules.Timers;
+using System.Text;
 using System.Text.Json;
 using Timer = CounterStrikeSharp.API.Modules.Timers.Timer;
 
@@ -14,20 +15,20 @@ namespace SmartRestart;
 public class SmartRestartPlugin : BasePlugin
 {
     public override string ModuleName => "Smart Restart Plugin";
-    public override string ModuleVersion => "1.0.0";
+    public override string ModuleVersion => "1.0.1";
     public override string ModuleAuthor => "Dipsy";
 
     private SmartRestartConfig _config = null!;
     private LanguageConfig _lang = null!;
     private string _configPath = "";
     private string _langPath = "";
+    private Logger _logger = null!;
     private DateTime _serverStartTime;
     private DateTime? _lastPlayerLeaveTime = null;
     private DateTime? _lastEmptyRestart = null;
     private int _peakPlayerCount = 0;
     private Dictionary<ulong, DateTime> _playerJoinTimes = new();
-    private List<TimeSpan> _completedSessions = new();
-    private DateTime? _lastSignificantActivity = null;
+    private bool _emptyMapActionExecuted = false;
     private Timer? _emptyServerTimer = null;
     private Timer? _scheduledRestartTimer = null;
     private DateTime? _nextScheduledRestart = null;
@@ -47,8 +48,7 @@ public class SmartRestartPlugin : BasePlugin
     public DateTime? LastEmptyRestart { get => _lastEmptyRestart; set => _lastEmptyRestart = value; }
     public int PeakPlayerCount { get => _peakPlayerCount; set => _peakPlayerCount = value; }
     public Dictionary<ulong, DateTime> PlayerJoinTimes => _playerJoinTimes;
-    public List<TimeSpan> CompletedSessions => _completedSessions;
-    public DateTime? LastSignificantActivity { get => _lastSignificantActivity; set => _lastSignificantActivity = value; }
+    public bool EmptyMapActionExecuted { get => _emptyMapActionExecuted; set => _emptyMapActionExecuted = value; }
     public Timer? EmptyServerTimer { get => _emptyServerTimer; set => _emptyServerTimer = value; }
     public DateTime? NextScheduledRestart => _nextScheduledRestart;
     public Timer? PendingRestartTimer { get => _pendingRestartTimer; set => _pendingRestartTimer = value; }
@@ -61,7 +61,12 @@ public class SmartRestartPlugin : BasePlugin
     {
         _serverStartTime = DateTime.Now;
         _configPath = Path.Combine(ModuleDirectory, "config.json");
+
+        // Initialize logger first
+        _logger = new Logger(ModuleDirectory);
+
         LoadConfig();
+        _logger.DebugEnabled = _config.Logging.DebugEnabled;
 
         // Load language file based on config
         _langPath = Path.Combine(ModuleDirectory, "lang", $"{_config.Language}.json");
@@ -74,7 +79,7 @@ public class SmartRestartPlugin : BasePlugin
         if (_config.Database.Enabled)
         {
             string hostname = GetServerHostname();
-            _databaseManager = new DatabaseManager(_config.Database, hostname);
+            _databaseManager = new DatabaseManager(_config.Database, hostname, startupTableMode: true);
             _ = InitializeDatabaseAsync();
         }
 
@@ -92,39 +97,11 @@ public class SmartRestartPlugin : BasePlugin
 
         // Start scheduled restart checker - check immediately then every 60 seconds
         AddTimer(1.0f, CheckScheduledRestarts); // Run once immediately
-        AddTimer(60.0f, CheckScheduledRestarts, TimerFlags.REPEAT); // Then repeat every minute
+        _scheduledRestartTimer = AddTimer(60.0f, CheckScheduledRestarts, TimerFlags.REPEAT); // Then repeat every minute
 
-        Console.WriteLine($"[SmartRestart] Plugin loaded. Auto-restart: {_config.EnableAutoRestart}");
-        Console.WriteLine($"[SmartRestart] Current server time: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        LoadConsole.WritePluginLoad(_config, _configPath, _langPath, _logger.LogDirectory);
 
-        // Log scheduled restarts
-        if (_config.ScheduledRestarts != null && _config.ScheduledRestarts.Any(r => r.Enabled))
-        {
-            Console.WriteLine($"[SmartRestart] Scheduled restarts configured:");
-            foreach (var restart in _config.ScheduledRestarts.Where(r => r.Enabled))
-            {
-                Console.WriteLine($"[SmartRestart]   - {restart.Hour:D2}:{restart.Minute:D2} - {restart.Description}");
-            }
-
-            // Show next scheduled restart
-            var now = DateTime.Now;
-            var nextRestart = _config.ScheduledRestarts
-                .Where(r => r.Enabled)
-                .Select(r => new DateTime(now.Year, now.Month, now.Day, r.Hour, r.Minute, 0))
-                .Select(dt => dt < now ? dt.AddDays(1) : dt)
-                .OrderBy(dt => dt)
-                .FirstOrDefault();
-
-            if (nextRestart != default(DateTime))
-            {
-                var timeUntil = nextRestart - now;
-                Console.WriteLine($"[SmartRestart] Next scheduled restart: {nextRestart:yyyy-MM-dd HH:mm} (in {timeUntil.TotalHours:F1} hours / {timeUntil.TotalMinutes:F0} minutes)");
-            }
-        }
-        else
-        {
-            Console.WriteLine($"[SmartRestart] No scheduled restarts configured.");
-        }
+        _logger?.LogDebug("Plugin load complete");
 
         // Send server online notification if webhook enabled
         if (!hotReload && _config.DiscordWebhook.Enabled && _config.DiscordWebhook.OnlineEmbed.Enabled)
@@ -187,14 +164,12 @@ public class SmartRestartPlugin : BasePlugin
                     AllowTrailingCommas = true
                 };
                 _config = JsonSerializer.Deserialize<SmartRestartConfig>(json, options) ?? new SmartRestartConfig();
-                Console.WriteLine($"[SmartRestart] Configuration loaded from {_configPath}");
             }
             else
             {
                 _config = new SmartRestartConfig();
                 Directory.CreateDirectory(Path.GetDirectoryName(_configPath)!);
                 File.WriteAllText(_configPath, GenerateConfigWithComments(_config));
-                Console.WriteLine($"[SmartRestart] Default configuration created at {_configPath}");
             }
         }
         catch (Exception ex)
@@ -211,36 +186,10 @@ public class SmartRestartPlugin : BasePlugin
         sb.AppendLine("  // Language settings");
         sb.AppendLine($"  \"Language\": \"{config.Language}\", // Available: en, ar, es, fr, de, he");
         sb.AppendLine();
-        sb.AppendLine("  // Auto-restart settings");
-        sb.AppendLine($"  \"EnableAutoRestart\": {config.EnableAutoRestart.ToString().ToLower()}, // Restart server automatically when empty");
-        sb.AppendLine($"  \"DelayAfterLastPlayerLeaves\": {config.DelayAfterLastPlayerLeaves}, // Seconds to wait after last player leaves");
-        sb.AppendLine($"  \"MinimumUptimeMinutes\": {config.MinimumUptimeMinutes}, // Minimum uptime (minutes) for MANUAL restarts - prevents accidental rapid restarts");
-        sb.AppendLine($"  \"MinimumUptimeForEmptyRestartHours\": {config.MinimumUptimeForEmptyRestartHours}, // Minimum uptime (hours) for AUTO empty-server restarts - prevents spam");
+        sb.AppendLine("  // Auto behavior");
+        sb.AppendLine($"  \"EnableAutoRestart\": {config.EnableAutoRestart.ToString().ToLower()}, // Enable auto behavior when server becomes empty");
+        sb.AppendLine($"  \"MinimumUptimeMinutes\": {config.MinimumUptimeMinutes}, // Minimum uptime (minutes) for MANUAL restarts");
         sb.AppendLine();
-        sb.AppendLine("  // Smart empty restart settings");
-        sb.AppendLine($"  \"EmptyRestartCooldownMinutes\": {config.EmptyRestartCooldownMinutes}, // Cooldown between empty restarts - prevents restart spam");
-        sb.AppendLine($"  \"MinimumPlayersBeforeEmptyRestart\": {config.MinimumPlayersBeforeEmptyRestart}, // Server must have had this many players before restarting when empty");
-        sb.AppendLine($"  \"RequirePlayerActivityForEmptyRestart\": {config.RequirePlayerActivityForEmptyRestart.ToString().ToLower()}, // Only restart if server had player activity since last restart");
-        sb.AppendLine();
-        sb.AppendLine("  // Advanced smart restart (time-aware + session-based)");
-        sb.AppendLine("  \"SmartEmptyRestart\": {");
-        sb.AppendLine($"    \"Enabled\": {config.SmartEmptyRestart.Enabled.ToString().ToLower()}, // Enable advanced smart restart logic");
-        sb.AppendLine($"    \"Strategy\": \"{config.SmartEmptyRestart.Strategy}\", // Options: Immediate, Smart");
-        sb.AppendLine("    \"PeakHours\": {");
-        sb.AppendLine($"      \"Enabled\": {config.SmartEmptyRestart.PeakHours.Enabled.ToString().ToLower()},");
-        sb.AppendLine($"      \"StartHour\": {config.SmartEmptyRestart.PeakHours.StartHour}, // 24-hour format");
-        sb.AppendLine($"      \"EndHour\": {config.SmartEmptyRestart.PeakHours.EndHour},");
-        sb.AppendLine($"      \"DelayMinutes\": {config.SmartEmptyRestart.PeakHours.DelayMinutes}, // Delay during peak hours");
-        sb.AppendLine($"      \"OffPeakDelayMinutes\": {config.SmartEmptyRestart.PeakHours.OffPeakDelayMinutes} // Delay during off-peak");
-        sb.AppendLine("    },");
-        sb.AppendLine("    \"SessionBased\": {");
-        sb.AppendLine($"      \"Enabled\": {config.SmartEmptyRestart.SessionBased.Enabled.ToString().ToLower()},");
-        sb.AppendLine($"      \"MinimumSessionLengthMinutes\": {config.SmartEmptyRestart.SessionBased.MinimumSessionLengthMinutes}, // Minimum session to count");
-        sb.AppendLine($"      \"MinimumTotalPlaytimeMinutes\": {config.SmartEmptyRestart.SessionBased.MinimumTotalPlaytimeMinutes}, // Total playtime required");
-        sb.AppendLine($"      \"RecentActivityWindowMinutes\": {config.SmartEmptyRestart.SessionBased.RecentActivityWindowMinutes} // Wait if recent activity");
-        sb.AppendLine("    },");
-        sb.AppendLine($"    \"MaximumEmptyWaitMinutes\": {config.SmartEmptyRestart.MaximumEmptyWaitMinutes} // Never wait longer than this");
-        sb.AppendLine("  },");
         sb.AppendLine();
         sb.AppendLine("  // Scheduled restarts");
         sb.AppendLine("  \"ScheduledRestarts\": [");
@@ -255,6 +204,16 @@ public class SmartRestartPlugin : BasePlugin
             sb.AppendLine(i < config.ScheduledRestarts.Count - 1 ? "    }," : "    }");
         }
         sb.AppendLine("  ],");
+        sb.AppendLine();
+        sb.AppendLine("  // Empty server behavior (no restart)");
+        sb.AppendLine("  \"EmptyServerBehavior\": {");
+        sb.AppendLine($"    \"Enabled\": {config.EmptyServerBehavior.Enabled.ToString().ToLower()}, // Change level to current map when empty");
+        sb.AppendLine($"    \"DelaySeconds\": {config.EmptyServerBehavior.DelaySeconds}, // Wait before executing map command after server is empty");
+        sb.AppendLine($"    \"ExecuteOnceUntilPlayerJoins\": {config.EmptyServerBehavior.ExecuteOnceUntilPlayerJoins.ToString().ToLower()}, // Avoid map-change spam while server remains empty");
+        sb.AppendLine($"    \"RepeatWhileStillEmpty\": {config.EmptyServerBehavior.RepeatWhileStillEmpty.ToString().ToLower()}, // Repeat map refresh while still empty");
+        sb.AppendLine($"    \"RepeatIntervalSeconds\": {config.EmptyServerBehavior.RepeatIntervalSeconds}, // Repeat interval when RepeatWhileStillEmpty is true");
+        sb.AppendLine($"    \"SkipIfScheduledRestartWithinMinutes\": {config.EmptyServerBehavior.SkipIfScheduledRestartWithinMinutes} // Skip map-change if scheduled restart is close");
+        sb.AppendLine("  },");
         sb.AppendLine();
         sb.AppendLine("  // Warning messages before restart");
         sb.AppendLine("  \"WarningMessages\": {");
@@ -320,7 +279,13 @@ public class SmartRestartPlugin : BasePlugin
         sb.AppendLine($"    \"Database\": \"{config.Database.Database}\",");
         sb.AppendLine($"    \"Username\": \"{config.Database.Username}\",");
         sb.AppendLine($"    \"Password\": \"{config.Database.Password}\",");
-        sb.AppendLine($"    \"RequiredPermission\": \"{config.Database.RequiredPermission}\" // Permission flag checked in sa_admins_groups and sa_admins tables");
+        sb.AppendLine($"    \"RequiredPermission\": \"{config.Database.RequiredPermission}\", // Permission flag checked in sa_admins_groups and sa_admins tables");
+        sb.AppendLine($"    \"PermissionCacheSeconds\": {config.Database.PermissionCacheSeconds} // Cache command permission checks to reduce database load");
+        sb.AppendLine("  },");
+        sb.AppendLine();
+        sb.AppendLine("  // Logging");
+        sb.AppendLine("  \"Logging\": {");
+        sb.AppendLine($"    \"DebugEnabled\": {config.Logging.DebugEnabled.ToString().ToLower()} // Enable only while troubleshooting; writes verbose debug logs");
         sb.AppendLine("  }");
         sb.AppendLine("}");
         return sb.ToString();
@@ -334,7 +299,6 @@ public class SmartRestartPlugin : BasePlugin
             {
                 string json = File.ReadAllText(_langPath);
                 _lang = JsonSerializer.Deserialize<LanguageConfig>(json) ?? new LanguageConfig();
-                Console.WriteLine($"[SmartRestart] Language file loaded from {_langPath}");
             }
             else
             {
@@ -342,7 +306,6 @@ public class SmartRestartPlugin : BasePlugin
                 string json = JsonSerializer.Serialize(_lang, new JsonSerializerOptions { WriteIndented = true });
                 Directory.CreateDirectory(Path.GetDirectoryName(_langPath)!);
                 File.WriteAllText(_langPath, json);
-                Console.WriteLine($"[SmartRestart] Default language file created at {_langPath}");
             }
         }
         catch (Exception ex)
@@ -362,65 +325,181 @@ public class SmartRestartPlugin : BasePlugin
             return $"{uptime.Minutes}m {uptime.Seconds}s";
     }
 
-    public bool ShouldScheduleEmptyRestart()
+    public int CountHumanPlayers()
     {
-        if (!_config.SmartEmptyRestart.Enabled || _config.SmartEmptyRestart.Strategy == "Immediate")
-        {
-            return true; // Simple immediate restart
-        }
+        return Utilities.GetPlayers().Count(p => p?.IsValid == true && !p.IsBot);
+    }
 
-        // Check 1: Cooldown period - prevent too frequent empty restarts
-        if (_lastEmptyRestart != null)
+    public void DebugLog(string message)
+    {
+        _logger?.LogDebug(message);
+    }
+
+    public string? GetCurrentMapName()
+    {
+        try
         {
-            var timeSinceLastRestart = DateTime.Now - _lastEmptyRestart.Value;
-            if (timeSinceLastRestart.TotalMinutes < _config.EmptyRestartCooldownMinutes)
+            // Use the ConVar to get current map name
+            var mapCvar = ConVar.Find("cs_map_name");
+            if (mapCvar != null && !string.IsNullOrEmpty(mapCvar.StringValue))
             {
-                var remainingCooldown = _config.EmptyRestartCooldownMinutes - timeSinceLastRestart.TotalMinutes;
-                Console.WriteLine($"[SmartRestart] Empty restart skipped: Cooldown active ({remainingCooldown:F1} minutes remaining).");
-                return false;
+                return mapCvar.StringValue;
+            }
+
+            // Fallback: try to get from Server.MapName if available
+            if (!string.IsNullOrEmpty(Server.MapName))
+            {
+                return Server.MapName;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning($"Failed to get current map name: {ex.Message}");
+        }
+        return null;
+    }
+
+    public bool IsWorkshopMap(string mapName)
+    {
+        return TryExtractWorkshopId(mapName, out _);
+    }
+
+    public bool TryExtractWorkshopId(string mapName, out string workshopId)
+    {
+        workshopId = string.Empty;
+        if (string.IsNullOrWhiteSpace(mapName))
+            return false;
+
+        // workshop/123456789/map_name
+        if (mapName.StartsWith("workshop/", StringComparison.OrdinalIgnoreCase))
+        {
+            var parts = mapName.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 2 && long.TryParse(parts[1], out _))
+            {
+                workshopId = parts[1];
+                return true;
             }
         }
 
-        // Check 2: Require player activity - server must have had minimum players
-        if (_config.RequirePlayerActivityForEmptyRestart)
+        // pure workshop id
+        if (long.TryParse(mapName, out _))
         {
-            if (_peakPlayerCount < _config.MinimumPlayersBeforeEmptyRestart)
-            {
-                Console.WriteLine($"[SmartRestart] Empty restart skipped: No player activity (peak: {_peakPlayerCount}, required: {_config.MinimumPlayersBeforeEmptyRestart}).");
-                _peakPlayerCount = 0; // Reset since we're skipping
-                return false;
-            }
+            workshopId = mapName;
+            return true;
         }
 
-        // Check 3: Session-based logic
-        if (_config.SmartEmptyRestart.SessionBased.Enabled)
+        return false;
+    }
+
+    public void ChangeToCurrentMap()
+    {
+        try
         {
-            var totalPlaytime = _completedSessions.Sum(s => s.TotalMinutes);
-            if (totalPlaytime < _config.SmartEmptyRestart.SessionBased.MinimumTotalPlaytimeMinutes)
+            var currentMap = GetCurrentMapName();
+            if (string.IsNullOrEmpty(currentMap))
             {
-                Console.WriteLine($"[SmartRestart] Empty restart skipped: Insufficient playtime ({totalPlaytime:F1}/{_config.SmartEmptyRestart.SessionBased.MinimumTotalPlaytimeMinutes} minutes).");
-                return false;
+                _logger?.LogWarning("Could not determine current map name");
+                Console.WriteLine("[SmartRestart] WARNING: Could not determine current map name");
+                return;
+            }
+
+            _logger?.Log($"Changing level to current map: {currentMap}");
+            Console.WriteLine($"[SmartRestart] Changing level to current map: {currentMap}");
+
+            // Check if it's a workshop map
+            if (TryExtractWorkshopId(currentMap, out var workshopId))
+            {
+                // Workshop map: use host_workshop_map command, then fallback to map command.
+                AddTimer(_config.EmptyServerBehavior.DelaySeconds, () =>
+                {
+                    try
+                    {
+                        _logger?.Log($"Executing: host_workshop_map {workshopId}");
+                        Server.ExecuteCommand($"host_workshop_map {workshopId}");
+                        _logger?.Log("Workshop map change command executed");
+
+                        // Fallback attempt for environments where workshop command may not resolve.
+                        AddTimer(3.0f, () =>
+                        {
+                            try
+                            {
+                                _logger?.LogWarning($"Workshop fallback: executing map {currentMap}");
+                                Server.ExecuteCommand($"map {currentMap}");
+                            }
+                            catch (Exception fallbackEx)
+                            {
+                                _logger?.LogError($"Workshop fallback map command failed: {fallbackEx.Message}");
+                            }
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.LogError($"Failed to execute workshop map change: {ex.Message}");
+                        Console.WriteLine($"[SmartRestart] ERROR: Failed to execute workshop map change: {ex.Message}");
+
+                        // Requested fallback behavior
+                        try
+                        {
+                            _logger?.LogWarning($"Falling back to map command: map {currentMap}");
+                            Server.ExecuteCommand($"map {currentMap}");
+                        }
+                        catch (Exception fallbackEx)
+                        {
+                            _logger?.LogError($"Fallback map command also failed: {fallbackEx.Message}");
+                        }
+                    }
+                });
+            }
+            else
+            {
+                // Official map: use map command
+                AddTimer(_config.EmptyServerBehavior.DelaySeconds, () =>
+                {
+                    try
+                    {
+                        _logger?.Log($"Executing: map {currentMap}");
+                        Server.ExecuteCommand($"map {currentMap}");
+                        _logger?.Log("Map change command executed");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.LogError($"Failed to execute map change: {ex.Message}");
+                        Console.WriteLine($"[SmartRestart] ERROR: Failed to execute map change: {ex.Message}");
+                    }
+                });
             }
         }
-
-        // Check 4: Recent activity window
-        if (_config.SmartEmptyRestart.SessionBased.Enabled && _lastSignificantActivity != null)
+        catch (Exception ex)
         {
-            var timeSinceActivity = DateTime.Now - _lastSignificantActivity.Value;
-            if (timeSinceActivity.TotalMinutes < _config.SmartEmptyRestart.SessionBased.RecentActivityWindowMinutes)
-            {
-                Console.WriteLine($"[SmartRestart] Empty restart delayed: Recent activity detected ({timeSinceActivity.TotalMinutes:F1} minutes ago).");
-                return false;
-            }
+            _logger?.LogError($"Exception in ChangeToCurrentMap: {ex.Message}");
+            Console.WriteLine($"[SmartRestart] ERROR: Exception in ChangeToCurrentMap: {ex.Message}");
+        }
+    }
+
+    public bool ShouldScheduleEmptyMapAction()
+    {
+        if (!_config.EnableAutoRestart || !_config.EmptyServerBehavior.Enabled)
+        {
+            return false;
         }
 
-        // Check 5: Avoid restarting right before a scheduled restart
-        if (_nextScheduledRestart != null)
+        // Do not spam empty-map action while server remains empty.
+        if (_config.EmptyServerBehavior.ExecuteOnceUntilPlayerJoins &&
+            !_config.EmptyServerBehavior.RepeatWhileStillEmpty &&
+            _emptyMapActionExecuted)
         {
-            var timeUntilScheduled = _nextScheduledRestart.Value - DateTime.Now;
-            if (timeUntilScheduled.TotalMinutes < 30) // Within 30 minutes of scheduled restart
+            return false;
+        }
+
+        // Skip map-change if a scheduled restart is close.
+        var nextScheduledFromConfig = GetNextScheduledRestartFromConfig(DateTime.Now);
+        if (nextScheduledFromConfig != null)
+        {
+            var timeUntilScheduled = nextScheduledFromConfig.Value - DateTime.Now;
+            if (timeUntilScheduled.TotalMinutes > 0 &&
+                timeUntilScheduled.TotalMinutes <= _config.EmptyServerBehavior.SkipIfScheduledRestartWithinMinutes)
             {
-                Console.WriteLine($"[SmartRestart] Empty restart skipped: Scheduled restart in {timeUntilScheduled.TotalMinutes:F0} minutes.");
+                Console.WriteLine($"[SmartRestart] Empty map change skipped: scheduled restart in {timeUntilScheduled.TotalMinutes:F0} minutes.");
                 return false;
             }
         }
@@ -428,54 +507,33 @@ public class SmartRestartPlugin : BasePlugin
         return true;
     }
 
-    public int CalculateSmartDelay()
+    private DateTime? GetNextScheduledRestartFromConfig(DateTime now)
     {
-        if (!_config.SmartEmptyRestart.Enabled || _config.SmartEmptyRestart.Strategy == "Immediate")
+        if (_config.ScheduledRestarts == null || _config.ScheduledRestarts.Count == 0)
         {
-            return _config.DelayAfterLastPlayerLeaves;
+            return null;
         }
 
-        // Time-of-day aware delay
-        if (_config.SmartEmptyRestart.PeakHours.Enabled)
-        {
-            var currentHour = DateTime.Now.Hour;
-            var isPeakTime = false;
+        var next = _config.ScheduledRestarts
+            .Where(r => r.Enabled)
+            .Select(r => new DateTime(now.Year, now.Month, now.Day, r.Hour, r.Minute, 0))
+            .Select(dt => dt <= now ? dt.AddDays(1) : dt)
+            .OrderBy(dt => dt)
+            .FirstOrDefault();
 
-            // Handle peak hours that may span midnight
-            if (_config.SmartEmptyRestart.PeakHours.StartHour <= _config.SmartEmptyRestart.PeakHours.EndHour)
-            {
-                isPeakTime = currentHour >= _config.SmartEmptyRestart.PeakHours.StartHour && 
-                             currentHour <= _config.SmartEmptyRestart.PeakHours.EndHour;
-            }
-            else
-            {
-                // Peak hours span midnight (e.g., 22:00 to 02:00)
-                isPeakTime = currentHour >= _config.SmartEmptyRestart.PeakHours.StartHour || 
-                             currentHour <= _config.SmartEmptyRestart.PeakHours.EndHour;
-            }
-
-            var delayMinutes = isPeakTime 
-                ? _config.SmartEmptyRestart.PeakHours.DelayMinutes 
-                : _config.SmartEmptyRestart.PeakHours.OffPeakDelayMinutes;
-
-            // Cap at maximum wait time
-            delayMinutes = Math.Min(delayMinutes, _config.SmartEmptyRestart.MaximumEmptyWaitMinutes);
-
-            var timeType = isPeakTime ? "peak hours" : "off-peak hours";
-            Console.WriteLine($"[SmartRestart] Smart delay: {delayMinutes} minutes ({timeType}, current hour: {currentHour:D2}:00)");
-
-            return delayMinutes * 60; // Convert to seconds
-        }
-
-        return _config.DelayAfterLastPlayerLeaves;
+        return next == default ? null : next;
     }
 
     private void CheckScheduledRestarts()
     {
         if (_config.ScheduledRestarts == null || _config.ScheduledRestarts.Count == 0)
+        {
+            _logger?.LogDebug("No scheduled restarts configured");
             return;
+        }
 
         DateTime now = DateTime.Now;
+        _logger?.LogDebug($"Checking scheduled restarts. Current time: {now:yyyy-MM-dd HH:mm:ss}");
 
         // Get the maximum warning time to know when to trigger early
         var maxWarningTime = _config.WarningMessages.Enabled && _config.WarningMessages.WarningTimes.Count > 0
@@ -483,6 +541,7 @@ public class SmartRestartPlugin : BasePlugin
             : 60; // Default to 1 minute if no warnings configured
 
         var triggerWindowMinutes = (maxWarningTime / 60.0) + 1; // Convert to minutes and add 1 minute buffer
+        _logger?.LogDebug($"Trigger window: {triggerWindowMinutes:F2} minutes (max warning: {maxWarningTime}s)");
 
         foreach (var restart in _config.ScheduledRestarts.Where(r => r.Enabled))
         {
@@ -496,41 +555,60 @@ public class SmartRestartPlugin : BasePlugin
 
             // Check if we should trigger a restart
             TimeSpan timeUntilRestart = scheduledTime - now;
+            _logger?.LogDebug($"Restart '{restart.Description}' - Scheduled: {scheduledTime:yyyy-MM-dd HH:mm:ss} | Time until: {timeUntilRestart.TotalMinutes:F2} minutes");
 
             // Trigger if within warning window and not already scheduled
             if (timeUntilRestart.TotalMinutes <= triggerWindowMinutes && timeUntilRestart.TotalSeconds > 0)
             {
-                // Check if this restart hasn't been triggered yet
-                if (_nextScheduledRestart == null || Math.Abs((_nextScheduledRestart.Value - scheduledTime).TotalMinutes) > 1)
+                _logger?.LogDebug($"Restart '{restart.Description}' - WITHIN TRIGGER WINDOW ({timeUntilRestart.TotalMinutes:F2} min <= {triggerWindowMinutes:F2} min)");
+
+                // Check if this restart hasn't been triggered yet (compare by exact time, not fuzzy 1-minute window)
+                if (_nextScheduledRestart == null || _nextScheduledRestart.Value.Date != scheduledTime.Date || 
+                    _nextScheduledRestart.Value.Hour != scheduledTime.Hour || 
+                    _nextScheduledRestart.Value.Minute != scheduledTime.Minute)
                 {
                     _nextScheduledRestart = scheduledTime;
                     var secondsUntilRestart = (int)timeUntilRestart.TotalSeconds;
 
+                    _logger?.LogRestart(restart.Description, $"Scheduled time: {scheduledTime:yyyy-MM-dd HH:mm:ss} | Delay: {secondsUntilRestart}s");
                     Console.WriteLine($"[SmartRestart] ⚠️ RESTART TRIGGERED: {restart.Description} scheduled for {scheduledTime:HH:mm} (in {timeUntilRestart.TotalMinutes:F1} minutes / {secondsUntilRestart} seconds)");
                     InitiateScheduledRestart(secondsUntilRestart, restart.Description);
+                }
+                else
+                {
+                    _logger?.LogDebug($"Restart '{restart.Description}' - Already triggered, skipping");
                 }
             }
             // Only log upcoming restarts once when they enter 30-minute window
             else if (timeUntilRestart.TotalMinutes <= 30 && timeUntilRestart.TotalMinutes > triggerWindowMinutes)
             {
                 // Only log if this is a new notification (not already logged in previous minute)
-                if (_nextScheduledRestart == null || Math.Abs((_nextScheduledRestart.Value - scheduledTime).TotalMinutes) > 1)
+                if (_nextScheduledRestart == null || _nextScheduledRestart.Value.Date != scheduledTime.Date || 
+                    _nextScheduledRestart.Value.Hour != scheduledTime.Hour || 
+                    _nextScheduledRestart.Value.Minute != scheduledTime.Minute)
                 {
+                    _logger?.LogDebug($"Restart '{restart.Description}' upcoming in {timeUntilRestart.TotalMinutes:F0} minutes");
                     Console.WriteLine($"[SmartRestart] Upcoming: {restart.Description} at {scheduledTime:HH:mm} (in {timeUntilRestart.TotalMinutes:F0} minutes)");
                 }
+            }
+            else
+            {
+                _logger?.LogDebug($"Restart '{restart.Description}' - Not yet in trigger window (in {timeUntilRestart.TotalMinutes:F2} min)");
             }
         }
     }
 
     private void InitiateScheduledRestart(int secondsUntilRestart, string description)
     {
-        var playerCount = Utilities.GetPlayers().Count(p => p?.IsValid == true && !p.IsBot);
+        var playerCount = CountHumanPlayers();
 
+        _logger?.LogRestart(description, $"Players: {playerCount} | Delay: {secondsUntilRestart}s ({secondsUntilRestart / 60.0:F1}m)");
         Console.WriteLine($"[SmartRestart] Scheduled restart initiating: {description} in {secondsUntilRestart} seconds ({secondsUntilRestart / 60.0:F1} minutes).");
 
         if (playerCount == 0)
         {
             // Server empty, restart at scheduled time but save info for late joiners
+            _logger?.Log($"Server is empty - restart will occur at scheduled time");
             Console.WriteLine($"[SmartRestart] Server is empty, restart will occur at scheduled time.");
             Console.WriteLine($"[SmartRestart] Warnings will start if players join before restart.");
 
@@ -544,6 +622,7 @@ public class SmartRestartPlugin : BasePlugin
             // Store the restart timer so we can cancel it if players join
             _pendingRestartTimer = AddTimer(Math.Max(1, secondsUntilRestart), () => 
             {
+                _logger?.Log($"Empty server restart timer triggered - executing restart");
                 _pendingRestartTimer = null;
                 _pendingRestartReason = "";
                 PerformRestart(sendDiscordMessage: false, reason: description, initiator: "Scheduled Restart");
@@ -552,6 +631,7 @@ public class SmartRestartPlugin : BasePlugin
         else
         {
             // Players online, send warnings and schedule restart
+            _logger?.Log($"{playerCount} player(s) online - sending warnings before restart");
             Console.WriteLine($"[SmartRestart] {playerCount} player(s) online, sending warnings before restart.");
 
             if (_config.DiscordWebhook.SendOnScheduledRestart && secondsUntilRestart > 30)
@@ -567,7 +647,8 @@ public class SmartRestartPlugin : BasePlugin
 
     public void ScheduleRestartWithWarnings(int totalSeconds, string reason = "Scheduled restart", string initiator = "System")
     {
-        Console.WriteLine($"[SmartRestart] ScheduleRestartWithWarnings called: totalSeconds={totalSeconds}, reason={reason}");
+        _logger?.Log($"ScheduleRestartWithWarnings: totalSeconds={totalSeconds}, reason='{reason}', initiator='{initiator}'");
+        _logger?.LogDebug($"ScheduleRestartWithWarnings called: totalSeconds={totalSeconds}, reason={reason}");
 
         // Clear any existing warning timers
         foreach (var timer in _warningTimers)
@@ -584,8 +665,8 @@ public class SmartRestartPlugin : BasePlugin
             return;
         }
 
-        Console.WriteLine($"[SmartRestart] Warnings enabled. ShowCenterAlert={_config.WarningMessages.ShowCenterAlert}");
-        Console.WriteLine($"[SmartRestart] Configured warning times: {string.Join(", ", _config.WarningMessages.WarningTimes)}");
+        _logger?.LogDebug($"Warnings enabled. ShowCenterAlert={_config.WarningMessages.ShowCenterAlert}");
+        _logger?.LogDebug($"Configured warning times: {string.Join(", ", _config.WarningMessages.WarningTimes)}");
 
         // Schedule chat warnings at configured times (5 min, 3 min, 2 min, 1 min, etc.)
         int scheduledChatWarnings = 0;
@@ -603,14 +684,14 @@ public class SmartRestartPlugin : BasePlugin
                     var message = _lang.RestartWarning.Replace("{time}", timeFormatted);
                     var fullMessage = $" {prefix} {LanguageConfig.ProcessColors(message)}";
 
-                    Console.WriteLine($"[SmartRestart] Sending chat warning: {timeFormatted} left");
+                    _logger?.LogDebug($"Sending chat warning: {timeFormatted} left");
                     Server.PrintToChatAll(fullMessage);
                 });
                 _warningTimers.Add(timer);
                 scheduledChatWarnings++;
             }
         }
-        Console.WriteLine($"[SmartRestart] Scheduled {scheduledChatWarnings} chat warnings");
+        _logger?.LogDebug($"Scheduled {scheduledChatWarnings} chat warnings");
 
         // Schedule continuous center alerts for last 30 seconds
         if (_config.WarningMessages.ShowCenterAlert)
@@ -622,16 +703,16 @@ public class SmartRestartPlugin : BasePlugin
 
                 var countdownTimer = AddTimer(delayUntilCountdown, () =>
                 {
-                    Console.WriteLine($"[SmartRestart] Starting 30-second center alert countdown");
+                    _logger?.LogDebug("Starting 30-second center alert countdown");
                     StartContinuousCenterCountdown(30);
                 });
                 _warningTimers.Add(countdownTimer);
-                Console.WriteLine($"[SmartRestart] Center countdown will start in {delayUntilCountdown} seconds");
+                _logger?.LogDebug($"Center countdown will start in {delayUntilCountdown} seconds");
             }
             else
             {
                 // Less than 30 seconds total, start countdown immediately
-                Console.WriteLine($"[SmartRestart] Starting immediate center alert countdown for {totalSeconds} seconds");
+                _logger?.LogDebug($"Starting immediate center alert countdown for {totalSeconds} seconds");
                 StartContinuousCenterCountdown(totalSeconds);
             }
         }
@@ -642,7 +723,7 @@ public class SmartRestartPlugin : BasePlugin
 
         // Final restart with proper reason
         AddTimer(totalSeconds, () => PerformRestart(sendDiscordMessage: true, reason: reason, initiator: initiator));
-        Console.WriteLine($"[SmartRestart] Final restart scheduled in {totalSeconds} seconds ({totalSeconds / 60.0:F1} minutes)");
+        _logger?.LogDebug($"Final restart scheduled in {totalSeconds} seconds ({totalSeconds / 60.0:F1} minutes)");
     }
 
     public bool CanRestart(bool isManualRestart = false)
@@ -663,6 +744,7 @@ public class SmartRestartPlugin : BasePlugin
 
     public void PerformRestart(bool sendDiscordMessage = true, string reason = "Server maintenance", string initiator = "System")
     {
+        _logger?.LogRestart("RESTART EXECUTING", $"Reason: {reason} | Initiator: {initiator} | Uptime: {DateTime.Now - _serverStartTime:hh\\:mm\\:ss}");
         Console.WriteLine($"[SmartRestart] ========== PERFORMING RESTART ==========");
         Console.WriteLine($"[SmartRestart] Reason: {reason}");
         Console.WriteLine($"[SmartRestart] Initiator: {initiator}");
@@ -672,11 +754,13 @@ public class SmartRestartPlugin : BasePlugin
         {
             try
             {
+                _logger?.Log("Sending Discord restart notification");
                 Console.WriteLine($"[SmartRestart] Sending Discord restart notification...");
                 _ = _discordWebhook?.SendRestartEmbed(reason, initiator);
             }
             catch (Exception ex)
             {
+                _logger?.LogError($"Discord notification failed: {ex.Message}");
                 Console.WriteLine($"[SmartRestart] Discord notification failed (non-fatal): {ex.Message}");
             }
         }
@@ -687,16 +771,19 @@ public class SmartRestartPlugin : BasePlugin
             var prefix = LanguageConfig.ProcessColors(_config.ChatPrefix);
             var message = LanguageConfig.ProcessColors(_lang.RestartingNow);
             Server.PrintToChatAll($" {prefix} {message}");
+            _logger?.Log("Chat notification sent to all players");
             Console.WriteLine($"[SmartRestart] Chat notification sent to all players");
         }
         catch (Exception ex)
         {
+            _logger?.LogWarning($"Chat notification failed: {ex.Message}");
             Console.WriteLine($"[SmartRestart] Chat notification failed (non-fatal): {ex.Message}");
         }
 
         // Clean up active timers and warnings to prevent interference
         try
         {
+            _logger?.Log("Cleaning up active timers");
             Console.WriteLine($"[SmartRestart] Cleaning up active timers...");
             foreach (var timer in _warningTimers)
             {
@@ -721,23 +808,40 @@ public class SmartRestartPlugin : BasePlugin
         }
         catch (Exception ex)
         {
+            _logger?.LogError($"Timer cleanup failed: {ex.Message}");
             Console.WriteLine($"[SmartRestart] Timer cleanup failed (non-fatal): {ex.Message}");
         }
 
+        _logger?.Log($"Executing restart command: {_config.RestartCommand}");
         Console.WriteLine($"[SmartRestart] Executing restart command: {_config.RestartCommand}");
 
-        // Execute restart command with minimal delay - server.ExecuteCommand is synchronous but safer with brief delay
+        // Execute restart command with minimal delay
+        // Note: Different hosting providers require different commands:
+        // - Pterodactyl/Pelican: "quit" (server stops, hosting panel restarts it)
+        // - Some hosted servers: "exit" or "_restart"
+        // If server doesn't restart, check your hosting provider's documentation
         AddTimer(1.0f, () =>
         {
             try
             {
-                Console.WriteLine($"[SmartRestart] ========== EXECUTING: {_config.RestartCommand} ==========");
+                _logger?.LogRestart("RESTART COMMAND EXECUTED", $"Command: {_config.RestartCommand} | Server uptime: {DateTime.Now - _serverStartTime:hh\\:mm\\:ss}");
+                Console.WriteLine($"[SmartRestart] ========== EXECUTING RESTART COMMAND ==========");
+                Console.WriteLine($"[SmartRestart] Command: {_config.RestartCommand}");
+                Console.WriteLine($"[SmartRestart] Server uptime: {DateTime.Now - _serverStartTime:hh\\:mm\\:ss}");
+                Console.WriteLine($"[SmartRestart] Timestamp: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+
                 Server.ExecuteCommand(_config.RestartCommand);
+
+                _logger?.Log("Restart command executed successfully - server should restart");
                 Console.WriteLine($"[SmartRestart] Restart command executed successfully");
+                Console.WriteLine($"[SmartRestart] If server doesn't restart, check that RestartCommand in config.json is correct for your hosting provider");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[SmartRestart] ERROR executing restart command: {ex.Message}");
+                _logger?.LogError($"ERROR executing restart command: {ex.Message} | Stack: {ex.StackTrace}");
+                Console.WriteLine($"[SmartRestart] ========== ERROR EXECUTING RESTART ==========");
+                Console.WriteLine($"[SmartRestart] Command: {_config.RestartCommand}");
+                Console.WriteLine($"[SmartRestart] Error: {ex.Message}");
                 Console.WriteLine($"[SmartRestart] Stack trace: {ex.StackTrace}");
             }
         });
@@ -748,7 +852,7 @@ public class SmartRestartPlugin : BasePlugin
         _countdownStartTime = DateTime.Now;
         _countdownDuration = (int)Math.Ceiling(totalSeconds);
 
-        Console.WriteLine($"[SmartRestart] Starting center countdown for {_countdownDuration} seconds");
+        _logger?.LogDebug($"Starting center countdown for {_countdownDuration} seconds");
 
         // Show initial message immediately
         ShowCountdownToPlayers(_countdownDuration);
@@ -767,13 +871,13 @@ public class SmartRestartPlugin : BasePlugin
 
                 if (secondsRemaining % 5 == 0 || secondsRemaining <= 5)
                 {
-                    Console.WriteLine($"[SmartRestart] Countdown: {secondsRemaining}s remaining");
+                    _logger?.LogDebug($"Countdown: {secondsRemaining}s remaining");
                 }
             }
             else
             {
                 _countdownStartTime = null;
-                Console.WriteLine($"[SmartRestart] Countdown completed");
+                _logger?.LogDebug("Countdown completed");
             }
         }, TimerFlags.REPEAT);
 
@@ -796,11 +900,11 @@ public class SmartRestartPlugin : BasePlugin
         // Try PrintToCenterAlert instead - it's designed for longer messages
         var message = $"⚠️ SERVER RESTART ⚠️\n{timeFormatted}";
 
-        var players = Utilities.GetPlayers().Where(p => p?.IsValid == true && !p.IsBot);
+        var players = Utilities.GetPlayers();
 
         foreach (var player in players)
         {
-            if (player?.IsValid == true)
+            if (player?.IsValid == true && !player.IsBot)
             {
                 // PrintToCenterAlert is designed for alerts and might be more stable
                 player.PrintToCenterAlert(message);
@@ -810,14 +914,14 @@ public class SmartRestartPlugin : BasePlugin
 
     private void ShowCenterAlert(string message, float durationSeconds)
     {
-        var players = Utilities.GetPlayers().Where(p => p?.IsValid == true && !p.IsBot);
+        var players = Utilities.GetPlayers();
 
         // Format message with HTML for larger red text
         var htmlMessage = $"<font class='fontSize-l' color='red'>{message}</font>";
 
         foreach (var player in players)
         {
-            if (player?.IsValid == true && player.PawnIsAlive)
+            if (player?.IsValid == true && !player.IsBot && player.PawnIsAlive)
             {
                 // PrintToCenterHtml duration parameter is in seconds, but as int
                 // Round up to ensure at least 2 seconds visibility
@@ -825,7 +929,7 @@ public class SmartRestartPlugin : BasePlugin
             }
         }
 
-        Console.WriteLine($"[SmartRestart] Center alert shown: {message} (duration: {durationSeconds}s)");
+        _logger?.LogDebug($"Center alert shown: {message} (duration: {durationSeconds}s)");
     }
 
     [ConsoleCommand("css_smartrestart", "Schedules a server restart")]
@@ -839,7 +943,7 @@ public class SmartRestartPlugin : BasePlugin
             return;
         }
 
-        var playerCount = Utilities.GetPlayers().Count(p => p?.IsValid == true && !p.IsBot);
+        var playerCount = CountHumanPlayers();
         var adminName = player?.PlayerName ?? "Console";
 
         if (playerCount == 0)
@@ -870,7 +974,12 @@ public class SmartRestartPlugin : BasePlugin
     public void OnReloadConfigCommand(CCSPlayerController? player, CommandInfo command)
     {
         LoadConfig();
+        _logger.DebugEnabled = _config.Logging.DebugEnabled;
         LoadLanguage();
+
+        // Reset state that depends on schedule config so changes are applied immediately.
+        _nextScheduledRestart = null;
+        _emptyMapActionExecuted = false;
 
         // Reinitialize database manager if enabled
         if (_config.Database.Enabled)
@@ -885,6 +994,119 @@ public class SmartRestartPlugin : BasePlugin
         }
 
         command.ReplyToCommand("[SmartRestart] Configuration and language files reloaded!");
+    }
+
+    [ConsoleCommand("css_cancelrestart", "Cancel the scheduled restart")]
+    [CommandHelper(minArgs: 0, usage: "", whoCanExecute: CommandUsage.CLIENT_ONLY)]
+    public void OnCancelRestartCommand(CCSPlayerController? player, CommandInfo command)
+    {
+        if (player == null || !player.IsValid)
+        {
+            command.ReplyToCommand("[SmartRestart] This command can only be used by players.");
+            return;
+        }
+
+        // Check if database is enabled for permission check
+        if (_config.Database.Enabled && _databaseManager != null)
+        {
+            var steamId = player.SteamID.ToString();
+            var playerName = player.PlayerName;
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    _logger?.LogDebug($"Checking permission for cancel restart: {playerName} (SteamID: {steamId})");
+
+                    bool hasPermission = false;
+                    try
+                    {
+                        hasPermission = await _databaseManager.CheckPlayerPermissionAsync(steamId).ConfigureAwait(false);
+                    }
+                    catch (Exception dbEx)
+                    {
+                        Console.WriteLine($"[SmartRestart] Database exception during permission check: {dbEx.Message}");
+                        hasPermission = false;
+                    }
+
+                    Server.NextFrame(() =>
+                    {
+                        if (player == null || !player.IsValid || !player.PlayerPawn.IsValid)
+                        {
+                            return;
+                        }
+
+                        if (!hasPermission)
+                        {
+                            player.PrintToChat($" {LanguageConfig.ProcessColors(_config.ChatPrefix)} {LanguageConfig.ProcessColors("{red}You don't have permission to cancel restart!{default}")}");
+                            Console.WriteLine($"[SmartRestart] {playerName} attempted to cancel restart without permission.");
+                            return;
+                        }
+
+                        CancelPendingRestart(player.PlayerName);
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[SmartRestart] Error in cancel restart command: {ex.Message}");
+                }
+            });
+        }
+        else
+        {
+            // No database, allow cancel (for debugging/testing)
+            CancelPendingRestart(player.PlayerName);
+        }
+    }
+
+    private void CancelPendingRestart(string playerName)
+    {
+        bool cancelled = false;
+
+        // Cancel scheduled restart timer
+        if (_pendingRestartTimer != null)
+        {
+            _pendingRestartTimer.Kill();
+            _pendingRestartTimer = null;
+            _pendingRestartReason = "";
+            cancelled = true;
+            Console.WriteLine($"[SmartRestart] Scheduled restart cancelled by {playerName}");
+            _logger?.Log($"Scheduled restart cancelled by {playerName}");
+        }
+
+        // Cancel warning timers
+        foreach (var timer in _warningTimers)
+        {
+            timer?.Kill();
+        }
+        _warningTimers.Clear();
+
+        // Cancel empty server timer
+        if (_emptyServerTimer != null)
+        {
+            _emptyServerTimer.Kill();
+            _emptyServerTimer = null;
+            cancelled = true;
+            Console.WriteLine($"[SmartRestart] Empty server restart cancelled by {playerName}");
+            _logger?.Log($"Empty server restart cancelled by {playerName}");
+        }
+
+        if (cancelled)
+        {
+            var prefix = LanguageConfig.ProcessColors(_config.ChatPrefix);
+            Server.PrintToChatAll($" {prefix} {LanguageConfig.ProcessColors("{green}Server restart has been cancelled!{default}")}");
+
+            if (_config.DiscordWebhook.Enabled)
+            {
+                _ = _discordWebhook?.SendDiscordWebhook("🛑 Server Restart Cancelled", 
+                    $"Cancelled by: {playerName}", 
+                    15158332); // Red/Orange color
+            }
+        }
+        else
+        {
+            Server.PrintToChatAll($" {LanguageConfig.ProcessColors(_config.ChatPrefix)} {LanguageConfig.ProcessColors("{yellow}No restart is currently scheduled.{default}")}");
+        }
     }
 
     [ConsoleCommand("css_serverrestart", "Restart the server (requires SimpleAdmin permission)")]
@@ -914,7 +1136,7 @@ public class SmartRestartPlugin : BasePlugin
         {
             try
             {
-                Console.WriteLine($"[SmartRestart] Checking permission for {playerName} (SteamID: {steamId})");
+                _logger?.LogDebug($"Checking permission for {playerName} (SteamID: {steamId})");
 
                 bool hasPermission = false;
                 try
@@ -927,7 +1149,7 @@ public class SmartRestartPlugin : BasePlugin
                     hasPermission = false;
                 }
 
-                Console.WriteLine($"[SmartRestart] Permission check result: {hasPermission}");
+                _logger?.LogDebug($"Permission check result: {hasPermission}");
 
                 // Execute on next tick to avoid threading issues
                 Server.NextFrame(() =>
@@ -935,7 +1157,7 @@ public class SmartRestartPlugin : BasePlugin
                     // Re-validate player is still connected
                     if (player == null || !player.IsValid || !player.PlayerPawn.IsValid)
                     {
-                        Console.WriteLine($"[SmartRestart] Player disconnected before permission check completed.");
+                        _logger?.LogDebug("Player disconnected before permission check completed.");
                         return;
                     }
 
@@ -954,7 +1176,7 @@ public class SmartRestartPlugin : BasePlugin
                     }
 
                     // Player has permission, proceed with restart
-                    var playerCount = Utilities.GetPlayers().Count(p => p?.IsValid == true && !p.IsBot);
+                    var playerCount = CountHumanPlayers();
 
                     if (playerCount <= 1) // Only the admin
                     {

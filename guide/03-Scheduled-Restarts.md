@@ -177,7 +177,8 @@ Target low-traffic hours for your region:
 
 3. **Watch console output:**
    ```
-   [SmartRestart] Next scheduled restart: 14:37 (Test)
+   Next scheduled restart: 2026-06-21 14:37 (123 min)
+   SmartRestart ready.
    ```
 
 4. **Wait for warnings:**
@@ -207,7 +208,7 @@ Target low-traffic hours for your region:
 1. Verify `"Enabled": true` for the restart entry
 2. Check Hour (0-23) and Minute (0-59) are valid
 3. Confirm server timezone matches your expectations
-4. Look for: `[SmartRestart] Next scheduled restart: ...` in console
+4. Look for `Next scheduled restart: ...` in the startup table
 
 </td>
 </tr>
